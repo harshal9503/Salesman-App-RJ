@@ -1,10 +1,12 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Image,
   TouchableOpacity,
+  RefreshControl,
+  ScrollView,
 } from 'react-native';
 import {
   DrawerItemList,
@@ -16,22 +18,79 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const CustomDrawer = (props) => {
   const navigation = useNavigation();
 
+  const [salesmanData, setSalesmanData] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchSalesmanDetails = async () => {
+    try {
+      const response = await fetch('https://rajmanijewellers.in/api/salesman/get-salesman-details');
+      const json = await response.json();
+      if (json.success && json.data) {
+        setSalesmanData(json.data);
+        console.log('Salesman Details:', json);
+      } else {
+        console.warn('Failed to fetch salesman details:', json.message);
+      }
+    } catch (error) {
+      console.error('Error fetching salesman details:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchSalesmanDetails();
+  }, []);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchSalesmanDetails().finally(() => setRefreshing(false));
+  }, []);
+
   const handleLogout = async () => {
-  await AsyncStorage.removeItem('userToken');
-  navigation.replace('Login'); // Go back to login
-};
+    await AsyncStorage.removeItem('userToken');
+    navigation.replace('Login'); // Go back to login
+  };
+
+  // Get profile image source
+  const getProfileImageSource = () => {
+    if (salesmanData?.image?.fileLocation) {
+      return { uri: salesmanData.image.fileLocation };
+    }
+    return require('../../assets/DrawerImg/profile.jpg');
+  };
 
   return (
-    <View>
+    <ScrollView
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          colors={[Colors.PRIMARY]}
+          tintColor={Colors.PRIMARY}
+        />
+      }
+      style={{ flex: 1 }}
+    >
       <View>
         {/* Profile Header */}
         <View style={styles.profileSection}>
           <Image
-            source={require('../../assets/DrawerImg/profile.jpg')} // replace with actual profile pic
+            source={getProfileImageSource()}
             style={styles.profilePic}
+            defaultSource={require('../../assets/DrawerImg/profile.jpg')}
+            onError={(e) => {
+              console.log('Error loading profile image:', e.nativeEvent.error);
+              // Fallback to default image if there's an error loading the remote image
+            }}
           />
-          <Text style={styles.profileName}>Kshitij Jain</Text>
-          <Text style={styles.profileEmail}>kshitijain@gmail.com</Text>
+          <Text style={styles.profileName}>
+            {salesmanData?.salesmanName || 'Loading...'}
+          </Text>
+          <Text style={styles.profileEmail}>
+            {salesmanData?.email || 'Loading...'}
+          </Text>
+          {/* <Text style={styles.profileContact}>
+            {salesmanData?.contactNumber ? `+91 ${salesmanData.contactNumber}` : ''}
+          </Text> */}
         </View>
 
         <View style={styles.divider} />
@@ -48,7 +107,7 @@ const CustomDrawer = (props) => {
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </ScrollView>
   );
 };
 
@@ -71,13 +130,19 @@ const styles = StyleSheet.create({
   profileName: {
     marginTop: 10,
     fontSize: 16,
-    fontFamily:'Poppins-Bold',
+    fontFamily: 'Poppins-Bold',
     color: '#000',
   },
   profileEmail: {
     fontSize: 12,
     color: '#555',
-    fontFamily:'Poppins-Regular',
+    fontFamily: 'Poppins-Regular',
+  },
+  profileContact: {
+    fontSize: 12,
+    color: '#555',
+    fontFamily: 'Poppins-Regular',
+    marginTop: 2,
   },
   divider: {
     borderBottomWidth: 1,
@@ -95,9 +160,9 @@ const styles = StyleSheet.create({
     fontSize: 23,
     marginLeft: 10,
     color: Colors.PRIMARY,
-    fontFamily:'Poppins-SemiBold',
+    fontFamily: 'Poppins-SemiBold',
   },
-  logoutIcon:{
+  logoutIcon: {
     width: 25,
     height: 25,
     tintColor: Colors.PRIMARY,

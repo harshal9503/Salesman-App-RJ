@@ -12,6 +12,7 @@ import {
   StatusBar,
   Alert,
   Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import {
   widthPercentageToDP as wp,
@@ -66,6 +67,7 @@ const CustomOrderScreen = ({ navigation, route }) => {
   const [dateDelivery, setDateDelivery] = useState(new Date());
   const [voucherNo, setVoucherNo] = useState('');
   const [isUpdate, setIsUpdate] = useState(false);
+  const [errors, setErrors] = useState({});
 
   let lastIndex = products.length - 1;
   const handlePurityDropOpen = () => setPurityDrop(!purityDrop);
@@ -79,6 +81,10 @@ const CustomOrderScreen = ({ navigation, route }) => {
       fetchInvoiceById(id);
     } else {
       fetchVoucherNo();
+      // Auto-fill today's date in DD-MM-YYYY format
+      const today = new Date();
+      const formattedDate = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
+      handleInvoiceChange('date', formattedDate);
     }
   }, [id]);
 
@@ -123,13 +129,18 @@ const CustomOrderScreen = ({ navigation, route }) => {
     const updatedProducts = [...products];
     updatedProducts[index][key] = value;
     setProducts(updatedProducts);
+    
+    // Clear error when user starts typing
+    if (errors[`product_${key}`]) {
+      setErrors(prev => ({ ...prev, [`product_${key}`]: '' }));
+    }
   };
 
   const onChange = (event, selectedDate) => {
     setShowPicker(false);
     if (selectedDate) {
       setDate(selectedDate);
-      const formattedDate = selectedDate.toISOString().split('T')[0];
+      const formattedDate = `${String(selectedDate.getDate()).padStart(2, '0')}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${selectedDate.getFullYear()}`;
       handleInvoiceChange('date', formattedDate);
     }
   };
@@ -138,23 +149,68 @@ const CustomOrderScreen = ({ navigation, route }) => {
     setShowPicker2(false);
     if (selectedDateSecond) {
       setDateDelivery(selectedDateSecond);
-      const formattedDate = selectedDateSecond.toISOString().split('T')[0];
+      const formattedDate = `${String(selectedDateSecond.getDate()).padStart(2, '0')}-${String(selectedDateSecond.getMonth() + 1).padStart(2, '0')}-${selectedDateSecond.getFullYear()}`;
       handleChange(lastIndex, 'expectedDeliveryDate', formattedDate);
+      
+      // Clear error when date is selected
+      if (errors.product_expectedDeliveryDate) {
+        setErrors(prev => ({ ...prev, product_expectedDeliveryDate: '' }));
+      }
     }
+  };
+
+  const validateForm = () => {
+    const newErrors = {};
+
+    // Validate required fields
+    if (!products[lastIndex].productName) newErrors.product_productName = 'Product Name is required';
+    if (!products[lastIndex].expectedAmount) newErrors.product_expectedAmount = 'Expected Amount is required';
+    
+    // Validate mobile number as required
+    if (!customerDetails.mobileNumber) {
+      newErrors.mobileNumber = 'Mobile Number is required';
+    } else if (!/^\d{10}$/.test(customerDetails.mobileNumber)) {
+      newErrors.mobileNumber = 'Mobile Number must be 10 digits';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   const navigateToPayment = () => {
     setInputClearPurity(false);
-    const invoiceEmpty = invoiceDetails.date === '';
-    const customerEmpty = customerDetails.customerNameEng === '';
-    const productsEmpty = products[0].productName === '';
-    if (invoiceEmpty || customerEmpty || productsEmpty) {
-      Alert.alert('Required', 'Please enter all fields');
+    
+    if (!validateForm()) {
+      Alert.alert('Required', 'Please fill all required fields');
       return;
     }
+    
+    // Prepare data with N/A for empty optional fields
+    const processedProducts = products.map(product => ({
+      ...product,
+      weightFrom: product.weightFrom || 'N/A',
+      weightTo: product.weightTo || 'N/A',
+      purity: product.purity || 'N/A',
+      size: product.size || 'N/A',
+      width: product.width || 'N/A',
+      stoneWeight: product.stoneWeight || 'N/A',
+      expectedWeight: product.expectedWeight || 'N/A',
+      rateCut: product.rateCut || 'N/A',
+      ratePerGram: product.ratePerGram || 'N/A',
+      expectedDeliveryDate: product.expectedDeliveryDate || 'N/A',
+      description: product.description || 'N/A',
+      craftsmanName: product.craftsmanName || 'N/A',
+    }));
+
+    const processedCustomerDetails = {
+      customerNameEng: customerDetails.customerNameEng || 'N/A',
+      mobileNumber: customerDetails.mobileNumber || 'N/A',
+      address: customerDetails.address || 'N/A',
+    };
+
     navigation.navigate('payment-third', {
-      productDetails: products,
-      customerDetails,
+      productDetails: processedProducts,
+      customerDetails: processedCustomerDetails,
       invoiceDetails,
       isUpdate,
       id,
@@ -167,6 +223,11 @@ const CustomOrderScreen = ({ navigation, route }) => {
     handleChange(lastIndex, 'purity', numericPurity);
     setPurityDrop(false);
     setInputClearPurity(false);
+
+    // Clear error when purity is selected
+    if (errors.product_purity) {
+      setErrors(prev => ({ ...prev, product_purity: '' }));
+    }
 
     if (liveGoldRate && liveGoldRate.data) {
       let rate = 0;
@@ -191,21 +252,36 @@ const CustomOrderScreen = ({ navigation, route }) => {
   };
 
   const toggleDropdownRateCut = item => {
-    const rateCutBol = item === 'Yes';
+    // Store the string value directly instead of converting to boolean
     setValueRateCut(item);
-    handleChange(lastIndex, 'rateCut', rateCutBol);
+    handleChange(lastIndex, 'rateCut', item);
     setRateCutDrop(false);
     setInputClearRateCut(false);
+
+    // Clear error when rate cut is selected
+    if (errors.product_rateCut) {
+      setErrors(prev => ({ ...prev, product_rateCut: '' }));
+    }
   };
 
   const handleCustomerChange = (key, value) => {
     const updated = { ...customerDetails, [key]: value };
     setCustomerDetails(updated);
+    
+    // Clear error when user starts typing
+    if (errors[key]) {
+      setErrors(prev => ({ ...prev, [key]: '' }));
+    }
   };
 
   const handleInvoiceChange = (key, value) => {
     const updated = { ...invoiceDetails, [key]: value };
     setInvoiceDetails(updated);
+    
+    // Clear error when user starts typing
+    if (errors[key]) {
+      setErrors(prev => ({ ...prev, [key]: '' }));
+    }
   };
 
   useEffect(() => {
@@ -249,11 +325,61 @@ const CustomOrderScreen = ({ navigation, route }) => {
     return '₹0';
   };
 
+  // Format weight inputs to allow only decimal numbers with max 3 decimal places
+  const formatWeightInput = (value) => {
+    // Allow only numbers and decimal point
+    const formattedValue = value.replace(/[^0-9.]/g, '');
+    
+    // Ensure only one decimal point
+    const parts = formattedValue.split('.');
+    if (parts.length > 2) {
+      return parts[0] + '.' + parts.slice(1).join('');
+    }
+    
+    // Limit to 3 decimal places
+    if (parts[1] && parts[1].length > 3) {
+      return parts[0] + '.' + parts[1].substring(0, 3);
+    }
+    
+    return formattedValue;
+  };
+
+  // Format amount input to allow only whole numbers
+  const formatAmountInput = (value) => {
+    return value.replace(/[^0-9]/g, '');
+  };
+
+  // Format product name to uppercase
+  const formatProductName = (value) => {
+    return value.toUpperCase();
+  };
+
+  // Format mobile number to allow only numbers and limit to 10 digits
+  const formatMobileNumber = (value) => {
+    const numbersOnly = value.replace(/[^0-9]/g, '');
+    return numbersOnly.slice(0, 10);
+  };
+
+  // Get minimum date for date pickers (today)
+  const getMinimumDate = () => {
+    return new Date();
+  };
+
+  // Helper function to get input style based on errors
+  const getInputStyle = (fieldName) => {
+    return errors[fieldName] ? [styles.input, styles.inputError] : styles.input;
+  };
+
+  // Helper function to get dropdown style based on errors
+  const getDropdownStyle = (fieldName) => {
+    return errors[fieldName] ? [styles.input, styles.inputError] : styles.input;
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
       <View style={styles.statusBarBackground} />
-      <View style={styles.backButton}>
+      <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.navigate('Main')}
           style={styles.backButtonTouch}
@@ -264,331 +390,343 @@ const CustomOrderScreen = ({ navigation, route }) => {
           />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
+        <Text style={styles.headerTitle}>Custom Order</Text>
+        <View style={styles.placeholder} />
       </View>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+      
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <Text style={styles.heading}>Today’s Gold Rate</Text>
-        <View style={styles.boxRow}>
-          <View style={styles.box}>
-            <Text style={styles.boxTitle}>18k</Text>
-            <Text style={styles.boxValue}>{getRate('price18k')}</Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.heading}>Today's Gold Rate</Text>
+          <View style={styles.boxRow}>
+            <View style={styles.box}>
+              <Text style={styles.boxTitle}>18k</Text>
+              <Text style={styles.boxValue}>{getRate('price18k')}</Text>
+            </View>
+            <View style={styles.box}>
+              <Text style={styles.boxTitle}>20k</Text>
+              <Text style={styles.boxValue}>{getRate('price20k')}</Text>
+            </View>
+            <View style={styles.box}>
+              <Text style={styles.boxTitle}>22k</Text>
+              <Text style={styles.boxValue}>{getRate('price22k')}</Text>
+            </View>
+            <View style={styles.box}>
+              <Text style={styles.boxTitle}>24k</Text>
+              <Text style={styles.boxValue}>{getRate('price24k')}</Text>
+            </View>
           </View>
-          <View style={styles.box}>
-            <Text style={styles.boxTitle}>20k</Text>
-            <Text style={styles.boxValue}>{getRate('price20k')}</Text>
-          </View>
-          <View style={styles.box}>
-            <Text style={styles.boxTitle}>22k</Text>
-            <Text style={styles.boxValue}>{getRate('price22k')}</Text>
-          </View>
-          <View style={styles.box}>
-            <Text style={styles.boxTitle}>24k</Text>
-            <Text style={styles.boxValue}>{getRate('price24k')}</Text>
-          </View>
-        </View>
-        <Text style={styles.infoText}>
-          Please fill in all the required details here and generate the invoice
-        </Text>
-        <View style={styles.sectionFirst}>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Voucher No.</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="0"
-              placeholderTextColor="#777"
-              value={voucherNo}
-              editable={false}
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Date</Text>
-            <TextInput
-              style={styles.input}
-              value={invoiceDetails.date ? invoiceDetails.date.slice(0, 10) : ""}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor="#777"
-              editable={false}
-            />
-            <TouchableOpacity
-              style={styles.dateContainer}
-              onPress={() => setShowPicker(true)}
-            >
-              <Image
-                source={require('../../assets/dateicon.png')}
-                style={styles.datePickerBtn}
+        
+          <View style={styles.sectionFirst}>
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Voucher No.</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                value={voucherNo}
+                editable={false}
               />
-            </TouchableOpacity>
-            {showPicker && (
-              <DateTimePicker
-                value={date}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={onChange}
+            </View>
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Date</Text>
+              <TextInput
+                style={styles.input}
+                value={invoiceDetails.date}
+                placeholderTextColor="#777"
+                editable={false}
               />
-            )}
-          </View>
-        </View>
-        <View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter Customer Name"
-              placeholderTextColor="#777"
-              value={customerDetails.customerNameEng}
-              onChangeText={value =>
-                handleCustomerChange('customerNameEng', value)
-              }
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Mobile Number</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="+91 0000000000"
-              placeholderTextColor="#777"
-              keyboardType="numeric"
-              maxLength={10}
-              value={String(customerDetails.mobileNumber)}
-              onChangeText={value =>
-                handleCustomerChange('mobileNumber', value)
-              }
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Address</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter Address"
-              placeholderTextColor="#777"
-              value={String(customerDetails.address)}
-              onChangeText={value => handleCustomerChange('address', value)}
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Product Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Jhumki"
-              placeholderTextColor="#777"
-              value={products[lastIndex].productName}
-              onChangeText={value =>
-                handleChange(lastIndex, 'productName', value)
-              }
-            />
-          </View>
-        </View>
-        <View style={styles.sectionFirst}>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Weight form</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="from"
-              placeholderTextColor="#777"
-              keyboardType="numeric"
-              value={String(products[lastIndex].weightFrom)}
-              onChangeText={value =>
-                handleChange(lastIndex, 'weightFrom', value)
-              }
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Weight to</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="to"
-              placeholderTextColor="#777"
-              keyboardType="numeric"
-              value={String(products[lastIndex].weightTo)}
-              onChangeText={value => handleChange(lastIndex, 'weightTo', value)}
-            />
-          </View>
-        </View>
-        <View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Purity</Text>
-            <View>
-              <TouchableOpacity onPress={handlePurityDropOpen}>
+              <TouchableOpacity
+                style={styles.dateContainer}
+                onPress={() => setShowPicker(true)}
+              >
                 <Image
-                  source={require('../../assets/down.png')}
-                  style={styles.dropdownArrow}
+                  source={require('../../assets/dateicon.png')}
+                  style={styles.datePickerBtn}
                 />
-                <View style={styles.input}>
-                  <Text style={styles.dropdownText}>
-                    {inputClearPurity ? 'Select purity' : valuePurity}
-                  </Text>
-                </View>
               </TouchableOpacity>
-              {purityDrop && (
-                <View style={styles.dropdownContainer}>
-                  {['18k', '20k', '22k', '24k'].map((purity, i) => (
-                    <TouchableOpacity
-                      key={i}
-                      onPress={() => toggleDropdownPurity(purity)}
-                    >
-                      <Text style={styles.dropdownOption}>{purity}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+              {showPicker && (
+                <DateTimePicker
+                  value={date}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={onChange}
+                  minimumDate={getMinimumDate()}
+                />
               )}
             </View>
           </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Size/Lenght</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="0"
-              placeholderTextColor="#777"
-              keyboardType="numeric"
-              value={String(products[lastIndex].size)}
-              onChangeText={value => handleChange(lastIndex, 'size', value)}
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Expected Weight</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="0"
-              placeholderTextColor="#777"
-              keyboardType="numeric"
-              value={String(products[lastIndex].expectedWeight)}
-              onChangeText={value =>
-                handleChange(lastIndex, 'expectedWeight', value)
-              }
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Width</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="0"
-              keyboardType="numeric"
-              placeholderTextColor="#777"
-              value={String(products[lastIndex].width)}
-              onChangeText={value => handleChange(lastIndex, 'width', value)}
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Stone weight</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="0"
-              placeholderTextColor="#777"
-              keyboardType="numeric"
-              value={String(products[lastIndex].stoneWeight)}
-              onChangeText={value =>
-                handleChange(lastIndex, 'stoneWeight', value)
-              }
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Rate cut</Text>
-            <View>
-              <TouchableOpacity onPress={handleRateCutDropOpen}>
-                <Image
-                  source={require('../../assets/down.png')}
-                  style={styles.dropdownArrow}
-                />
-                <View style={styles.input}>
-                  <Text style={styles.dropdownText}>
-                    {inputClearRateCut ? 'Select Ratecut' : valueRateCut}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-              {rateCutDrop && (
-                <View style={styles.dropdownContainer}>
-                  {['Yes', 'No'].map((rateCut, i) => (
-                    <TouchableOpacity
-                      key={i}
-                      onPress={() => toggleDropdownRateCut(rateCut)}
-                    >
-                      <Text style={styles.dropdownOption}>{rateCut}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
+          
+          <View>
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Name</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                value={customerDetails.customerNameEng}
+                onChangeText={value =>
+                  handleCustomerChange('customerNameEng', value)
+                }
+              />
+            </View>
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Mobile Number *</Text>
+              <TextInput
+                style={getInputStyle('mobileNumber')}
+                placeholderTextColor="#777"
+                keyboardType="numeric"
+                maxLength={10}
+                value={String(customerDetails.mobileNumber)}
+                onChangeText={value =>
+                  handleCustomerChange('mobileNumber', formatMobileNumber(value))
+                }
+              />
+              {errors.mobileNumber && <Text style={styles.errorText}>{errors.mobileNumber}</Text>}
+            </View>
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Address</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                value={String(customerDetails.address)}
+                onChangeText={value => handleCustomerChange('address', value)}
+              />
+            </View>
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Product Name *</Text>
+              <TextInput
+                style={getInputStyle('product_productName')}
+                placeholderTextColor="#777"
+                value={products[lastIndex].productName}
+                onChangeText={value =>
+                  handleChange(lastIndex, 'productName', formatProductName(value))
+                }
+                autoCapitalize="characters"
+              />
+              {errors.product_productName && <Text style={styles.errorText}>{errors.product_productName}</Text>}
             </View>
           </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Rate</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="0"
-              keyboardType="numeric"
-              placeholderTextColor="#777"
-              value={String(products[lastIndex].ratePerGram)}
-              onChangeText={value =>
-                handleChange(lastIndex, 'ratePerGram', value)
-              }
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Expected Delivery Date</Text>
-            <TextInput
-              style={styles.input}
-              value={products[lastIndex].expectedDeliveryDate ? products[lastIndex].expectedDeliveryDate.slice(0, 10) : ''}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor="#777"
-              editable={false}
-            />
-            <TouchableOpacity
-              style={styles.dateContainer}
-              onPress={() => setShowPicker2(true)}
-            >
-              <Image
-                source={require('../../assets/dateicon.png')}
-                style={styles.datePickerBtn}
+          
+          <View style={styles.sectionFirst}>
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Weight From</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                keyboardType="decimal-pad"
+                value={String(products[lastIndex].weightFrom)}
+                onChangeText={value =>
+                  handleChange(lastIndex, 'weightFrom', formatWeightInput(value))
+                }
               />
-            </TouchableOpacity>
-            {showPicker2 && (
-              <DateTimePicker
-                value={dateDelivery}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={onChangeSecond}
+            </View>
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Weight To</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                keyboardType="decimal-pad"
+                value={String(products[lastIndex].weightTo)}
+                onChangeText={value => handleChange(lastIndex, 'weightTo', formatWeightInput(value))}
               />
-            )}
+            </View>
           </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Description</Text>
-            <TextInput
-              style={styles.description}
-              multiline
-              value={products[lastIndex].description}
-              onChangeText={value =>
-                handleChange(lastIndex, 'description', value)
-              }
-            />
+          
+          <View>
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Purity</Text>
+              <View>
+                <TouchableOpacity onPress={handlePurityDropOpen}>
+                  <Image
+                    source={require('../../assets/down.png')}
+                    style={styles.dropdownArrow}
+                  />
+                  <View style={styles.input}>
+                    <Text style={styles.dropdownText}>
+                      {inputClearPurity ? 'Select Purity' : valuePurity}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                {purityDrop && (
+                  <View style={styles.dropdownContainer}>
+                    {['18k', '20k', '22k', '24k'].map((purity, i) => (
+                      <TouchableOpacity
+                        key={i}
+                        onPress={() => toggleDropdownPurity(purity)}
+                      >
+                        <Text style={styles.dropdownOption}>{purity}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+            
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Size/Length</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                keyboardType="numeric"
+                value={String(products[lastIndex].size)}
+                onChangeText={value => handleChange(lastIndex, 'size', value)}
+              />
+            </View>
+            
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Expected Weight</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                keyboardType="decimal-pad"
+                value={String(products[lastIndex].expectedWeight)}
+                onChangeText={value =>
+                  handleChange(lastIndex, 'expectedWeight', formatWeightInput(value))
+                }
+              />
+            </View>
+            
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Width</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                keyboardType="numeric"
+                value={String(products[lastIndex].width)}
+                onChangeText={value => handleChange(lastIndex, 'width', value)}
+              />
+            </View>
+            
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Stone Weight</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                keyboardType="decimal-pad"
+                value={String(products[lastIndex].stoneWeight)}
+                onChangeText={value =>
+                  handleChange(lastIndex, 'stoneWeight', formatWeightInput(value))
+                }
+              />
+            </View>
+            
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Rate Cut</Text>
+              <View>
+                <TouchableOpacity onPress={handleRateCutDropOpen}>
+                  <Image
+                    source={require('../../assets/down.png')}
+                    style={styles.dropdownArrow}
+                  />
+                  <View style={styles.input}>
+                    <Text style={styles.dropdownText}>
+                      {inputClearRateCut ? 'Select Ratecut' : valueRateCut}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                {rateCutDrop && (
+                  <View style={styles.dropdownContainer}>
+                    {['Yes', 'No'].map((rateCut, i) => (
+                      <TouchableOpacity
+                        key={i}
+                        onPress={() => toggleDropdownRateCut(rateCut)}
+                      >
+                        <Text style={styles.dropdownOption}>{rateCut}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+            
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Rate</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                keyboardType="numeric"
+                value={String(products[lastIndex].ratePerGram)}
+                onChangeText={value =>
+                  handleChange(lastIndex, 'ratePerGram', value)
+                }
+              />
+            </View>
+            
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Expected Delivery Date</Text>
+              <TextInput
+                style={styles.input}
+                value={products[lastIndex].expectedDeliveryDate}
+                placeholderTextColor="#777"
+                editable={false}
+              />
+              <TouchableOpacity
+                style={styles.dateContainer}
+                onPress={() => setShowPicker2(true)}
+              >
+                <Image
+                  source={require('../../assets/dateicon.png')}
+                  style={styles.datePickerBtn}
+                />
+              </TouchableOpacity>
+              {showPicker2 && (
+                <DateTimePicker
+                  value={dateDelivery}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={onChangeSecond}
+                  minimumDate={getMinimumDate()}
+                />
+              )}
+            </View>
+            
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                style={styles.description}
+                multiline
+                placeholderTextColor="#777"
+                value={products[lastIndex].description}
+                onChangeText={value =>
+                  handleChange(lastIndex, 'description', value)
+                }
+              />
+            </View>
+            
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Expected Amount *</Text>
+              <TextInput
+                style={getInputStyle('product_expectedAmount')}
+                placeholderTextColor="#777"
+                keyboardType="numeric"
+                value={String(products[lastIndex].expectedAmount)}
+                onChangeText={value =>
+                  handleChange(lastIndex, 'expectedAmount', formatAmountInput(value))
+                }
+              />
+              {errors.product_expectedAmount && <Text style={styles.errorText}>{errors.product_expectedAmount}</Text>}
+            </View>
+            
+            <View style={styles.inputContainerHalf}>
+              <Text style={styles.label}>Karigar Name</Text>
+              <TextInput
+                style={styles.input}
+                placeholderTextColor="#777"
+                value={products[lastIndex].craftsmanName}
+                onChangeText={value =>
+                  handleChange(lastIndex, 'craftsmanName', value)
+                }
+              />
+            </View>
           </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Expected Amount</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="0"
-              keyboardType="numeric"
-              placeholderTextColor="#777"
-              value={String(products[lastIndex].expectedAmount)}
-              onChangeText={value =>
-                handleChange(lastIndex, 'expectedAmount', value)
-              }
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Craftman Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter Craftman Name"
-              placeholderTextColor="#777"
-              value={products[lastIndex].craftsmanName}
-              onChangeText={value =>
-                handleChange(lastIndex, 'craftsmanName', value)
-              }
-            />
-          </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+      
       <View style={styles.footer}>
         <TouchableOpacity style={styles.payButton} onPress={navigateToPayment}>
           <Text style={styles.payText}>{isUpdate ? "Update" : "Save"}</Text>
@@ -603,14 +741,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
+  keyboardAvoid: {
+    flex: 1,
+  },
   statusBarBackground: {
     height: Platform.OS === 'ios' ? 60 : 40,
     backgroundColor: Colors.PRIMARY,
     width: '100%',
   },
-  backButton: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     width: '100%',
     height: hp('6%'),
     backgroundColor: '#fff',
@@ -631,7 +773,19 @@ const styles = StyleSheet.create({
     fontSize: wp('4%'),
     fontFamily: 'Poppins-Bold',
     color: '#000',
-    marginTop: 5,
+    marginTop: 0,
+    fontWeight:'bold'
+  },
+  headerTitle: {
+    fontSize: wp('4.5%'),
+    fontFamily: 'Poppins-Bold',
+    color: '#000',
+    textAlign: 'center',
+    flex: 1,
+    fontWeight:'bold'
+  },
+  placeholder: {
+    width: wp('15%'),
   },
   scrollContent: {
     padding: wp('4%'),
@@ -639,7 +793,7 @@ const styles = StyleSheet.create({
     paddingTop: hp('1%'),
   },
   heading: {
-    fontSize: wp('5%'),
+    fontSize: wp('4.5%'),
     fontFamily: 'Poppins-SemiBold',
     color: '#222',
     textAlign: 'center',
@@ -662,14 +816,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: wp('2.5%'),
     paddingVertical: 0,
     borderRadius: wp('1.5%'),
-    marginBottom: hp('1%'),
+    marginBottom: hp('0.5%'),
     fontSize: wp('3.5%'),
     fontFamily: 'Poppins-Medium',
     color: '#000',
     textAlignVertical: 'center',
     includeFontPadding: false,
   },
-  inputContainerHalf: { flex: 1 },
+  inputError: {
+    borderColor: 'red',
+    borderWidth: 1.5,
+  },
+  errorText: {
+    color: 'red',
+    fontSize: wp('2.8%'),
+    fontFamily: 'Poppins-Regular',
+    marginBottom: hp('1%'),
+    marginLeft: wp('1%'),
+  },
+  inputContainerHalf: { 
+    flex: 1,
+    marginBottom: hp('0.5%'),
+  },
   footer: {
     position: 'absolute',
     bottom: 0,
@@ -702,6 +870,8 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textAlignVertical: 'top',
     color: '#000',
+    fontSize: wp('3.5%'),
+    fontFamily: 'Poppins-Medium',
   },
   boxRow: {
     flexDirection: 'row',

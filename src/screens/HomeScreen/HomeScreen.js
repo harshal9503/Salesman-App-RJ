@@ -33,7 +33,7 @@ const HomeScreen = () => {
   const getTodayFormattedDate = () => {
     const today = new Date();
     const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0'); // Month starts at 0
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
   };
@@ -63,10 +63,16 @@ const HomeScreen = () => {
 
       console.log('Sales data API response:', response.data);
 
-      if (response.data.success && response.data.sales) {
+      if (response.data.success && response.data.sales && response.data.repairing) {
+        // Add cash and upi from both sales and repairing
+        const totalCash =
+          (response.data.sales.cash ?? 0) + (response.data.repairing.cash ?? 0);
+        const totalUpi =
+          (response.data.sales.upi ?? 0) + (response.data.repairing.upi ?? 0);
+
         setSalesData({
-          cash: response.data.sales.cash ?? 0,
-          upi: response.data.sales.upi ?? 0,
+          cash: totalCash,
+          upi: totalUpi,
         });
       } else {
         Alert.alert('Error', 'Failed to fetch sales data');

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,10 @@ import {
   Alert,
   Platform,
   StatusBar,
+  Keyboard,
 } from 'react-native';
+import moment from 'moment';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   widthPercentageToDP as wp,
   heightPercentageToDP as hp,
@@ -25,11 +28,11 @@ const { width } = Dimensions.get('window');
 const RepairingInvoiceScreen = ({ navigation }) => {
   const [expandedCustomer, setExpandedCustomer] = useState(true);
   const [expandedProduct, setExpandedProduct] = useState(false);
-  const [productForm, setProductForm] = useState(false);
+  const [expandedProducts, setExpandedProducts] = useState({});
   const [products, setProducts] = useState([]);
-  const [metalDrop, setMetalDrop] = useState(false);
-  const [valueMetal, setValueMetal] = useState();
-  const [inputClearMetal, setInputClearMetal] = useState(true);
+  const [metalDropdowns, setMetalDropdowns] = useState({});
+  const [metalValues, setMetalValues] = useState({});
+  const [inputClearMetal, setInputClearMetal] = useState({});
   const [customerDetails, setCustomerDetails] = useState({
     customerNameEng: '',
     customerNameHin: '',
@@ -45,7 +48,31 @@ const RepairingInvoiceScreen = ({ navigation }) => {
   const [errorsInvoice, setErrorsInvoice] = useState({});
   const [errorsProduct, setErrorsProduct] = useState({});
 
-  let lastIndex = products.length - 1;
+  const scrollViewRef = useRef(null);
+  const inputRefs = useRef({});
+
+  useEffect(() => {
+    const today = new Date();
+    const formattedDate = moment(today).format('DD-MM-YYYY');
+    setInvoiceDetails({ date: formattedDate });
+    setDate(today);
+    
+    // Fetch salesman details
+    fetchSalesmanDetails();
+  }, []);
+
+  const fetchSalesmanDetails = async () => {
+    try {
+      const response = await fetch('https://rajmanijewellers.in/api/salesman/get-salesman-details');
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        setSalesmanContactNumber(result.data.contactNumber.toString());
+      }
+    } catch (error) {
+      console.log('Error fetching salesman details:', error);
+    }
+  };
 
   const isValidIndianMobile = number => {
     const regExp = /^[6-9]\d{9}$/;
@@ -88,9 +115,6 @@ const RepairingInvoiceScreen = ({ navigation }) => {
   };
 
   const handleAddProduct = () => {
-    setProductForm(true);
-    if (!expandedProduct) setExpandedProduct(true);
-
     const newProduct = {
       productName: '',
       netWeightInGrams: '',
@@ -100,32 +124,106 @@ const RepairingInvoiceScreen = ({ navigation }) => {
       finalAmount: '',
     };
 
+    const newIndex = products.length;
     setProducts(prev => [...prev, newProduct]);
+
+    // Auto-collapse customer details when adding product
+    if (expandedCustomer) setExpandedCustomer(false);
+
+    // Initialize states for new product
+    setInputClearMetal(prev => ({ ...prev, [newIndex]: true }));
+    setExpandedProducts(prev => ({ ...prev, [newIndex]: true }));
+
+    // Auto-scroll to the new product after a short delay
+    setTimeout(() => {
+      scrollToProduct(newIndex);
+    }, 100);
+
+    setTimeout(() => {
+      focusOnProductName(newIndex);
+    }, 300);
+  };
+
+  const scrollToProduct = (index) => {
+    const inputKey = `product_${index}_productName`;
+    if (inputRefs.current[inputKey] && scrollViewRef.current) {
+      inputRefs.current[inputKey].measureLayout(
+        scrollViewRef.current,
+        (x, y) => {
+          scrollViewRef.current.scrollTo({
+            y: Math.max(0, y - hp('10%')),
+            animated: true,
+          });
+        },
+        () => {}
+      );
+    }
+  };
+
+  const focusOnProductName = (index) => {
+    const inputKey = `product_${index}_productName`;
+    if (inputRefs.current[inputKey]) {
+      inputRefs.current[inputKey].focus();
+    }
+  };
+
+  const handleInputFocus = (inputKey) => {
+    setTimeout(() => {
+      if (inputRefs.current[inputKey] && scrollViewRef.current) {
+        inputRefs.current[inputKey].measureLayout(
+          scrollViewRef.current,
+          (x, y) => {
+            scrollViewRef.current.scrollTo({
+              y: Math.max(0, y - hp('20%')),
+              animated: true,
+            });
+          },
+          () => {}
+        );
+      }
+    }, 100);
   };
 
   const toggleDropdownCustomer = () => {
     setExpandedCustomer(prev => !prev);
+    // Close all product dropdowns when opening customer
+    if (!expandedCustomer) {
+      setExpandedProducts({});
+    }
   };
 
-  const toggleDropdownProduct = () => {
-    setExpandedProduct(prev => !prev);
+  const toggleDropdownProduct = (index) => {
+    setExpandedProducts(prev => {
+      const newState = { ...prev };
+      newState[index] = !newState[index];
+      
+      // If opening this product, close customer details
+      if (newState[index] && expandedCustomer) {
+        setExpandedCustomer(false);
+      }
+      
+      return newState;
+    });
   };
 
-  const handleTypeDropOpen = () => {
-    setMetalDrop(!metalDrop);
+  const handleTypeDropOpen = (index) => {
+    setMetalDropdowns(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
   };
 
-  const toggleDropdownMetal = item => {
-    setValueMetal(item);
-    handleChange(lastIndex, 'metal', item);
-    setMetalDrop(false);
-    setInputClearMetal(false);
+  const toggleDropdownMetal = (item, index) => {
+    setMetalValues(prev => ({ ...prev, [index]: item }));
+    handleChange(index, 'metal', item);
+    setMetalDropdowns(prev => ({ ...prev, [index]: false }));
+    setInputClearMetal(prev => ({ ...prev, [index]: false }));
 
-    if (errorsProduct[lastIndex]?.metal) {
+    if (errorsProduct[index]?.metal) {
       const updatedErrors = { ...errorsProduct };
-      delete updatedErrors[lastIndex].metal;
-      if (Object.keys(updatedErrors[lastIndex]).length === 0) {
-        delete updatedErrors[lastIndex];
+      delete updatedErrors[index].metal;
+      if (Object.keys(updatedErrors[index]).length === 0) {
+        delete updatedErrors[index];
       }
       setErrorsProduct(updatedErrors);
     }
@@ -135,8 +233,7 @@ const RepairingInvoiceScreen = ({ navigation }) => {
     setShowPicker(false);
     if (selectedDate) {
       setDate(selectedDate);
-
-      const formattedDate = selectedDate.toISOString().split('T')[0];
+      const formattedDate = moment(selectedDate).format('DD-MM-YYYY');
       setInvoiceDetails(prev => ({
         ...prev,
         date: formattedDate,
@@ -148,6 +245,29 @@ const RepairingInvoiceScreen = ({ navigation }) => {
         setErrorsInvoice(newErrors);
       }
     }
+  };
+
+  // Format weight fields to 3 decimal places
+  const formatWeightInput = (value) => {
+    if (!value) return '';
+    let val = value.replace(/[^0-9.]/g, '');
+    const parts = val.split('.');
+    if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
+    if (val.startsWith('.')) val = '0' + val;
+    if (val === '.' || val === '') return '';
+    const decimalParts = val.split('.');
+    if (decimalParts.length === 2) {
+      decimalParts[1] = decimalParts[1].slice(0, 3);
+      val = decimalParts[0] + '.' + decimalParts[1];
+    }
+    return val;
+  };
+
+  // Helper to format weights anywhere else (for display, totals)
+  const formatWeightDisplay = (val) => {
+    let num = parseFloat(val);
+    if (isNaN(num)) num = 0;
+    return num.toFixed(3);
   };
 
   const calculateTotals = () => {
@@ -166,54 +286,16 @@ const RepairingInvoiceScreen = ({ navigation }) => {
     return {
       totalAmount: totalAmount.toFixed(3),
       totalPieces,
-      totalNetWeight: totalNetWeight.toFixed(3),
+      totalNetWeight: formatWeightDisplay(totalNetWeight),
     };
   };
 
   const navigateToPayment = () => {
-    let newErrorsCustomer = {};
-    let newErrorsInvoice = {};
     let newErrorsProduct = {};
     let valid = true;
     let missingFields = [];
 
-    if (!invoiceDetails.date || invoiceDetails.date.trim() === '') {
-      newErrorsInvoice.date = true;
-      missingFields.push('Invoice Date');
-      valid = false;
-    }
-
-    if (!customerDetails.customerNameEng || customerDetails.customerNameEng.trim() === '') {
-      newErrorsCustomer.customerNameEng = true;
-      missingFields.push('Customer Name (English)');
-      valid = false;
-    }
-    if (!customerDetails.mobileNumber || customerDetails.mobileNumber.trim() === '') {
-      newErrorsCustomer.mobileNumber = true;
-      missingFields.push('Customer Mobile Number');
-      valid = false;
-    } else if (!isValidIndianMobile(customerDetails.mobileNumber.trim())) {
-      newErrorsCustomer.mobileNumber = true;
-      Alert.alert('Invalid Mobile Number', 'Please enter a valid 10-digit Indian mobile number starting with 6-9.');
-      setErrorsCustomer(newErrorsCustomer);
-      return;
-    }
-    if (!customerDetails.address || customerDetails.address.trim() === '') {
-      newErrorsCustomer.address = true;
-      missingFields.push('Customer Address');
-      valid = false;
-    }
-
-    if (!salesmanContactNumber || salesmanContactNumber.trim() === '') {
-      newErrorsCustomer.salesmanContactNumber = true;
-      missingFields.push('Salesman Contact Number');
-      valid = false;
-    } else if (!isValidIndianMobile(salesmanContactNumber.trim())) {
-      newErrorsCustomer.salesmanContactNumber = true;
-      Alert.alert('Invalid Salesman Number', 'Please enter a valid 10-digit Indian salesman mobile number starting with 6-9.');
-      setErrorsCustomer(newErrorsCustomer);
-      return;
-    }
+    let customerNameEngFinal = customerDetails.customerNameEng?.trim() || 'Cash';
 
     if (products.length === 0) {
       Alert.alert('Required', 'Please add at least one product');
@@ -226,38 +308,9 @@ const RepairingInvoiceScreen = ({ navigation }) => {
           missingFields.push(`Product ${index + 1} Name`);
           valid = false;
         }
-        if (!product.metal || product.metal.trim() === '') {
-          if (!newErrorsProduct[index]) newErrorsProduct[index] = {};
-          newErrorsProduct[index].metal = true;
-          missingFields.push(`Product ${index + 1} Metal`);
-          valid = false;
-        }
-        const pieceVal = parseInt(product.piece, 10);
-        if (!product.piece || product.piece.trim() === '' || isNaN(pieceVal) || pieceVal <= 0) {
-          if (!newErrorsProduct[index]) newErrorsProduct[index] = {};
-          newErrorsProduct[index].piece = true;
-          missingFields.push(`Product ${index + 1} Piece`);
-          valid = false;
-        }
-        const weightVal = parseFloat(product.netWeightInGrams);
-        if (!product.netWeightInGrams || product.netWeightInGrams.trim() === '' || isNaN(weightVal) || weightVal <= 0) {
-          if (!newErrorsProduct[index]) newErrorsProduct[index] = {};
-          newErrorsProduct[index].netWeightInGrams = true;
-          missingFields.push(`Product ${index + 1} Net Weight`);
-          valid = false;
-        }
-        const amountVal = parseFloat(product.finalAmount);
-        if (!product.finalAmount || product.finalAmount.trim() === '' || isNaN(amountVal) || amountVal <= 0) {
-          if (!newErrorsProduct[index]) newErrorsProduct[index] = {};
-          newErrorsProduct[index].finalAmount = true;
-          missingFields.push(`Product ${index + 1} Amount`);
-          valid = false;
-        }
       });
     }
 
-    setErrorsCustomer(newErrorsCustomer);
-    setErrorsInvoice(newErrorsInvoice);
     setErrorsProduct(newErrorsProduct);
 
     if (!valid) {
@@ -266,20 +319,98 @@ const RepairingInvoiceScreen = ({ navigation }) => {
       return;
     }
 
-    const filteredProducts = products.filter(p =>
-      p.productName &&
-      p.metal &&
-      p.piece &&
-      p.netWeightInGrams &&
-      p.finalAmount
-    );
+    const filteredProducts = products.filter(p => p.productName && p.productName.trim() !== '');
 
     navigation.navigate('payment-second', {
       invoiceDetails,
-      customerDetails,
+      customerDetails: { ...customerDetails, customerNameEng: customerNameEngFinal },
       productDetails: filteredProducts,
       salesmanContactNumber,
     });
+  };
+
+  const removeProduct = (indexToRemove) => {
+    if (products.length <= 1) {
+      Alert.alert('Cannot Remove', 'At least one product is required');
+      return;
+    }
+
+    Alert.alert(
+      'Remove Product',
+      `Are you sure you want to remove Product ${indexToRemove + 1}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            setProducts(prev => prev.filter((_, index) => index !== indexToRemove));
+            
+            // Clean up states for removed product
+            setExpandedProducts(prev => {
+              const newState = { ...prev };
+              delete newState[indexToRemove];
+              // Shift indices down for remaining products
+              const updatedState = {};
+              Object.keys(newState).forEach(key => {
+                const index = parseInt(key);
+                if (index > indexToRemove) {
+                  updatedState[index - 1] = newState[key];
+                } else if (index < indexToRemove) {
+                  updatedState[index] = newState[key];
+                }
+              });
+              return updatedState;
+            });
+
+            setMetalDropdowns(prev => {
+              const newState = { ...prev };
+              delete newState[indexToRemove];
+              const updatedState = {};
+              Object.keys(newState).forEach(key => {
+                const index = parseInt(key);
+                if (index > indexToRemove) {
+                  updatedState[index - 1] = newState[key];
+                } else if (index < indexToRemove) {
+                  updatedState[index] = newState[key];
+                }
+              });
+              return updatedState;
+            });
+
+            setMetalValues(prev => {
+              const newState = { ...prev };
+              delete newState[indexToRemove];
+              const updatedState = {};
+              Object.keys(newState).forEach(key => {
+                const index = parseInt(key);
+                if (index > indexToRemove) {
+                  updatedState[index - 1] = newState[key];
+                } else if (index < indexToRemove) {
+                  updatedState[index] = newState[key];
+                }
+              });
+              return updatedState;
+            });
+
+            setInputClearMetal(prev => {
+              const newState = { ...prev };
+              delete newState[indexToRemove];
+              const updatedState = {};
+              Object.keys(newState).forEach(key => {
+                const index = parseInt(key);
+                if (index > indexToRemove) {
+                  updatedState[index - 1] = newState[key];
+                } else if (index < indexToRemove) {
+                  updatedState[index] = newState[key];
+                }
+              });
+              return updatedState;
+            });
+          },
+        },
+      ]
+    );
   };
 
   const totals = calculateTotals();
@@ -293,6 +424,12 @@ const RepairingInvoiceScreen = ({ navigation }) => {
     return styles.input;
   };
 
+  // Get product display name with serialization
+  const getProductDisplayName = (index, productName) => {
+    if (!productName) return `Product ${index + 1}`;
+    return `Product ${index + 1}: ${productName}`;
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
@@ -300,7 +437,12 @@ const RepairingInvoiceScreen = ({ navigation }) => {
 
       <View style={styles.header} />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        ref={scrollViewRef}
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButtonTouch}>
             <Image source={require('../../assets/backarrow.png')} style={styles.backarrow} />
@@ -312,16 +454,12 @@ const RepairingInvoiceScreen = ({ navigation }) => {
           <View style={styles.placeholderView} />
         </View>
 
-        <Text style={styles.infoText}>
-          Please fill in all the required details here and generate the invoice
-        </Text>
-
         <View style={styles.inputContainer}>
           <Text style={styles.label}>Date</Text>
           <TextInput
             style={getInputStyle('date', errorsInvoice)}
             value={invoiceDetails.date}
-            placeholder="YYYY-MM-DD"
+            placeholder="DD-MM-YYYY"
             placeholderTextColor="#777"
             editable={false}
           />
@@ -334,6 +472,7 @@ const RepairingInvoiceScreen = ({ navigation }) => {
               mode="date"
               display={Platform.OS === 'ios' ? 'spinner' : 'default'}
               onChange={onChange}
+              minimumDate={new Date()}
             />
           )}
         </View>
@@ -357,57 +496,63 @@ const RepairingInvoiceScreen = ({ navigation }) => {
               <View style={styles.inputContainerHalf}>
                 <Text style={styles.label}>Name (In Eng)</Text>
                 <TextInput
+                  ref={ref => inputRefs.current['customerNameEng'] = ref}
                   style={getInputStyle('customerNameEng', errorsCustomer)}
-                  placeholder="Enter name"
+                  placeholder=""
                   placeholderTextColor="#777"
                   value={customerDetails.customerNameEng}
                   onChangeText={text =>
                     handleCustomerDetailsChange('customerNameEng', text)
                   }
+                  onFocus={() => handleInputFocus('customerNameEng')}
                 />
               </View>
 
               <View style={styles.inputContainerHalf}>
                 <Text style={styles.label}>Name (In Hindi)</Text>
                 <TextInput
+                  ref={ref => inputRefs.current['customerNameHin'] = ref}
                   style={styles.input}
-                  placeholder="हिंदी नाम"
+                  placeholder=""
                   placeholderTextColor="#777"
                   value={customerDetails.customerNameHin}
                   onChangeText={text =>
                     handleCustomerDetailsChange('customerNameHin', text)
                   }
+                  onFocus={() => handleInputFocus('customerNameHin')}
                 />
               </View>
             </View>
 
             <View style={styles.fullInputContainer}>
-              <Text style={[styles.label, styles.requiredLabel]}>
-                Mobile number <Text style={styles.red}>*</Text>
-              </Text>
+              <Text style={styles.label}>Mobile number</Text>
               <TextInput
-                style={getInputStyle('mobileNumber', errorsCustomer)}
+                ref={ref => inputRefs.current['mobileNumber'] = ref}
+                style={styles.input}
                 keyboardType="phone-pad"
-                placeholder="+91 0000000000"
+                placeholder=""
                 placeholderTextColor="#777"
                 value={customerDetails.mobileNumber}
                 onChangeText={text =>
                   handleCustomerDetailsChange('mobileNumber', text)
                 }
                 maxLength={10}
+                onFocus={() => handleInputFocus('mobileNumber')}
               />
             </View>
 
             <View style={styles.fullInputContainer}>
-              <Text style={getInputStyle('address', errorsCustomer) ? {...styles.label, color:'red'} : styles.label}>Address</Text>
+              <Text style={styles.label}>Address</Text>
               <TextInput
-                style={getInputStyle('address', errorsCustomer)}
-                placeholder="Enter address"
+                ref={ref => inputRefs.current['address'] = ref}
+                style={styles.input}
+                placeholder=""
                 placeholderTextColor="#777"
                 value={customerDetails.address}
                 onChangeText={text =>
                   handleCustomerDetailsChange('address', text)
                 }
+                onFocus={() => handleInputFocus('address')}
               />
             </View>
 
@@ -415,31 +560,48 @@ const RepairingInvoiceScreen = ({ navigation }) => {
           </>
         )}
 
-        {(productForm || expandedProduct) && (
-          <>
-            <TouchableOpacity style={styles.sectionHeaderRow} onPress={toggleDropdownProduct}>
-              <Text style={styles.sectionTitle}>Product</Text>
-              <Image
-                source={require('../../assets/dropdownicon.png')}
-                style={{
-                  width: wp('4.5%'),
-                  height: hp('1.2%'),
-                  tintColor: Colors.BTNRED,
-                  transform: [{ rotate: expandedProduct ? '0deg' : '180deg' }],
-                }}
-              />
+        {/* Products Section */}
+        {products.map((product, index) => (
+          <View key={index}>
+            <TouchableOpacity 
+              style={[styles.sectionHeaderRow, { marginTop: index === 0 ? hp('2%') : hp('1%') }]} 
+              onPress={() => toggleDropdownProduct(index)}
+            >
+              <Text style={styles.sectionTitle}>Product {index + 1}</Text>
+              <View style={styles.productHeaderRight}>
+                {products.length > 1 && (
+                  <TouchableOpacity 
+                    onPress={() => removeProduct(index)}
+                    style={styles.removeProductBtn}
+                  >
+                    <Text style={styles.removeProductText}>Remove</Text>
+                  </TouchableOpacity>
+                )}
+                <Image
+                  source={require('../../assets/dropdownicon.png')}
+                  style={{
+                    width: wp('4.5%'),
+                    height: hp('1.2%'),
+                    tintColor: Colors.BTNRED,
+                    transform: [{ rotate: expandedProducts[index] ? '0deg' : '180deg' }],
+                    marginLeft: wp('2%'),
+                  }}
+                />
+              </View>
             </TouchableOpacity>
 
-            {expandedProduct && (
-              <View>
+            {expandedProducts[index] && (
+              <View style={styles.productContainer}>
                 <View style={styles.inputContainerFull}>
                   <Text style={styles.label}>Product name <Text style={styles.red}>*</Text></Text>
                   <TextInput
-                    style={getInputStyle('productName', errorsProduct, lastIndex)}
-                    placeholder="Enter product name"
+                    ref={ref => inputRefs.current[`product_${index}_productName`] = ref}
+                    style={getInputStyle('productName', errorsProduct, index)}
+                    placeholder=""
                     placeholderTextColor="#777"
-                    value={products[lastIndex]?.productName}
-                    onChangeText={value => handleChange(lastIndex, 'productName', value)}
+                    value={product.productName}
+                    onChangeText={value => handleChange(index, 'productName', value)}
+                    onFocus={() => handleInputFocus(`product_${index}_productName`)}
                   />
                 </View>
 
@@ -447,64 +609,58 @@ const RepairingInvoiceScreen = ({ navigation }) => {
                   <View style={styles.inputContainerHalf}>
                     <Text style={styles.label}>Weight</Text>
                     <TextInput
-                      style={getInputStyle('netWeightInGrams', errorsProduct, lastIndex)}
-                      placeholder="Enter weight in grams"
+                      ref={ref => inputRefs.current[`product_${index}_weight`] = ref}
+                      style={styles.input}
+                      placeholder=""
                       keyboardType="numeric"
                       placeholderTextColor="#777"
-                      value={products[lastIndex]?.netWeightInGrams}
+                      value={product.netWeightInGrams}
                       onChangeText={value => {
-                        // Limit decimal to max 3 digits and no negative
-                        let val = value.replace(/[^0-9.]/g, '');
-                        const dotIndex = val.indexOf('.');
-                        if (dotIndex !== -1) {
-                          const parts = val.split('.');
-                          parts[1] = parts[1].substring(0, 3);
-                          val = parts[0] + '.' + parts[1];
-                        }
-                        handleChange(lastIndex, 'netWeightInGrams', val);
+                        const formattedVal = formatWeightInput(value);
+                        handleChange(index, 'netWeightInGrams', formattedVal);
                       }}
+                      onFocus={() => handleInputFocus(`product_${index}_weight`)}
                     />
                   </View>
                   <View style={styles.inputContainerHalf}>
                     <Text style={styles.label}>Piece</Text>
                     <TextInput
-                      style={getInputStyle('piece', errorsProduct, lastIndex)}
-                      placeholder="Enter number of pieces"
+                      ref={ref => inputRefs.current[`product_${index}_piece`] = ref}
+                      style={styles.input}
+                      placeholder=""
                       keyboardType="numeric"
                       placeholderTextColor="#777"
-                      value={products[lastIndex]?.piece}
+                      value={product.piece}
                       onChangeText={value => {
                         let val = value.replace(/[^0-9]/g, '');
-                        handleChange(lastIndex, 'piece', val);
+                        handleChange(index, 'piece', val);
                       }}
+                      onFocus={() => handleInputFocus(`product_${index}_piece`)}
                     />
                   </View>
                 </View>
 
                 <View style={styles.marginTopBeforeMetal}>
                   <View style={[styles.inputContainer, { width: '100%' }]}>
-                    <Text style={styles.label}>Metal <Text style={styles.red}>*</Text></Text>
+                    <Text style={styles.label}>Metal</Text>
                     <View>
-                      <TouchableOpacity onPress={handleTypeDropOpen} activeOpacity={0.8} style={styles.metalDropdownButtonFull}>
-                        <Text style={[styles.dropdownText, { flex: 1, color: inputClearMetal ? '#aaa' : '#000' }]}>
-                          {inputClearMetal ? 'Select metal' : valueMetal}
+                      <TouchableOpacity onPress={() => handleTypeDropOpen(index)} activeOpacity={0.8} style={styles.metalDropdownButtonFull}>
+                        <Text style={[styles.dropdownText, { flex: 1, color: inputClearMetal[index] ? '#aaa' : '#000' }]}>
+                          {inputClearMetal[index] ? 'Select metal' : metalValues[index]}
                         </Text>
                         <Image source={require('../../assets/down.png')} style={styles.dropdownArrow} />
                       </TouchableOpacity>
-                      {metalDrop && (
+                      {metalDropdowns[index] && (
                         <View style={styles.dropdownContainer}>
-                          <TouchableOpacity onPress={() => toggleDropdownMetal('Gold')}>
+                          <TouchableOpacity onPress={() => toggleDropdownMetal('Gold', index)}>
                             <Text style={styles.dropdownOption}>Gold</Text>
                           </TouchableOpacity>
-                          <TouchableOpacity onPress={() => toggleDropdownMetal('Silver')}>
+                          <TouchableOpacity onPress={() => toggleDropdownMetal('Silver', index)}>
                             <Text style={styles.dropdownOption}>Silver</Text>
                           </TouchableOpacity>
                         </View>
                       )}
                     </View>
-                    {errorsProduct[lastIndex]?.metal && (
-                      <Text style={{ color: 'red', fontSize: wp('3%') }}>Please select metal</Text>
-                    )}
                   </View>
                 </View>
 
@@ -512,26 +668,29 @@ const RepairingInvoiceScreen = ({ navigation }) => {
                   <View style={styles.inputContainerFullWidth}>
                     <Text style={styles.label}>Description</Text>
                     <TextInput
+                      ref={ref => inputRefs.current[`product_${index}_description`] = ref}
                       style={styles.inputDescriptionFullWidth}
                       multiline
-                      placeholder="Enter product description"
+                      placeholder=""
                       placeholderTextColor="#777"
-                      textAlignVertical="center"
-                      value={products[lastIndex]?.description}
-                      onChangeText={value => handleChange(lastIndex, 'description', value)}
+                      textAlignVertical="top"
+                      value={product.description}
+                      onChangeText={value => handleChange(index, 'description', value)}
+                      onFocus={() => handleInputFocus(`product_${index}_description`)}
                     />
                   </View>
                 </View>
 
                 <View>
                   <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Amount <Text style={styles.red}>*</Text></Text>
+                    <Text style={styles.label}>Amount</Text>
                     <TextInput
-                      style={getInputStyle('finalAmount', errorsProduct, lastIndex)}
-                      placeholder="Enter amount"
+                      ref={ref => inputRefs.current[`product_${index}_amount`] = ref}
+                      style={styles.input}
+                      placeholder=""
                       keyboardType="numeric"
                       placeholderTextColor="#777"
-                      value={products[lastIndex]?.finalAmount}
+                      value={product.finalAmount}
                       onChangeText={value => {
                         let val = value.replace(/[^0-9.]/g, '');
                         const dotIndex = val.indexOf('.');
@@ -540,27 +699,29 @@ const RepairingInvoiceScreen = ({ navigation }) => {
                           parts[1] = parts[1].substring(0, 3);
                           val = parts[0] + '.' + parts[1];
                         }
-                        handleChange(lastIndex, 'finalAmount', val);
+                        handleChange(index, 'finalAmount', val);
                       }}
+                      onFocus={() => handleInputFocus(`product_${index}_amount`)}
                     />
                   </View>
                 </View>
               </View>
             )}
-          </>
-        )}
+          </View>
+        ))}
 
         <TouchableOpacity onPress={handleAddProduct}>
           <Text style={styles.addProduct}>+ Add more products</Text>
         </TouchableOpacity>
 
         <View style={styles.inputContainer}>
-          <Text style={[styles.label, errorsCustomer.salesmanContactNumber ? { color: 'red' } : {}]}>
+          <Text style={styles.label}>
             Contact number (salesman)
           </Text>
           <TextInput
-            style={getInputStyle('salesmanContactNumber', errorsCustomer)}
-            placeholder="+91 0000000000"
+            ref={ref => inputRefs.current['salesmanContact'] = ref}
+            style={styles.input}
+            placeholder=""
             placeholderTextColor="#777"
             keyboardType="numeric"
             maxLength={10}
@@ -568,12 +729,8 @@ const RepairingInvoiceScreen = ({ navigation }) => {
             onChangeText={value => {
               let val = value.replace(/[^0-9]/g, '');
               setSalesmanContactNumber(val);
-              if (errorsCustomer.salesmanContactNumber) {
-                const newErrors = { ...errorsCustomer };
-                delete newErrors.salesmanContactNumber;
-                setErrorsCustomer(newErrors);
-              }
             }}
+            onFocus={() => handleInputFocus('salesmanContact')}
           />
         </View>
 
@@ -583,11 +740,11 @@ const RepairingInvoiceScreen = ({ navigation }) => {
 
             <View style={styles.totalContainer}>
               {products.map((product, index) => {
-                if (!product.productName && !product.finalAmount) return null;
+                if (!product.productName) return null;
                 return (
                   <View key={index} style={styles.productRow}>
                     <Text style={styles.productName}>
-                      Product {index + 1}: {product.productName || 'Unnamed Product'}
+                      {getProductDisplayName(index, product.productName)}
                     </Text>
                     <Text style={styles.productAmount}>₹{product.finalAmount || '0.000'}</Text>
                   </View>
@@ -632,8 +789,6 @@ const RepairingInvoiceScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  // ... all previous styles (same as above) ...
-  // Copy the full styles from your original code plus the added ones for error borders and totals
   container: { flex: 1, backgroundColor: '#fff' },
   statusBarBackground: {
     height: Platform.OS === 'ios' ? 60 : 40,
@@ -668,7 +823,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: hp('2%'),
-    marginTop: hp('5%'),
+    marginTop: hp('6%'),
   },
   backButtonTouch: {
     flexDirection: 'row',
@@ -684,28 +839,23 @@ const styles = StyleSheet.create({
   backText: {
     fontSize: wp('4%'),
     fontFamily: 'Poppins-Bold',
-    color: Colors.PRIMARY,
+    color: '#000',
   },
   heading: {
     fontSize: wp('5%'),
-    fontFamily: 'Poppins-SemiBold',
+    fontFamily: 'Poppins-Bold',
     color: '#222',
     textAlign: 'center',
     flex: 1,
+    fontWeight: 'bold',
   },
   placeholderView: { width: wp('15%') },
-  infoText: {
-    fontSize: wp('3.5%'),
-    color: '#888',
-    marginBottom: hp('2%'),
-    fontFamily: 'Poppins-Medium',
-    textAlign: 'center',
-  },
   rowNameContainer: { flexDirection: 'row', justifyContent: 'space-between' },
   inputContainerHalf: { width: '48%', marginBottom: hp('1%') },
   inputContainerFull: { marginBottom: hp('2%'), width: '100%' },
   inputContainerFullWidth: { marginBottom: hp('2%'), width: '100%' },
   fullInputContainer: { marginBottom: hp('2%') },
+  inputContainer: { marginBottom: hp('2%') },
   input: {
     height: hp('5%'),
     borderColor: '#ccc',
@@ -722,12 +872,13 @@ const styles = StyleSheet.create({
     borderColor: '#ccc',
     borderWidth: 1,
     paddingHorizontal: wp('2.5%'),
+    paddingVertical: wp('2%'),
     borderRadius: wp('1.5%'),
     fontSize: wp('3.5%'),
     fontFamily: 'Poppins-Medium',
     color: '#000',
     width: '100%',
-    textAlignVertical: 'center',
+    textAlignVertical: 'top',
   },
   rowWeightPiece: {
     flexDirection: 'row',
@@ -748,7 +899,6 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: hp('0.5%'),
   },
-  requiredLabel: { fontFamily: 'Poppins-Medium' },
   red: { color: 'red' },
   addProduct: {
     color: Colors.BTNRED,
@@ -784,12 +934,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: hp('1%'),
+    marginBottom: hp('0.8%'),
+    marginTop: hp('2%'),
   },
   sectionTitle: {
     fontSize: wp('4.2%'),
     fontFamily: 'Poppins-Medium',
     color: Colors.BTNRED,
+  },
+  productHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  removeProductBtn: {
+    backgroundColor: '#ff4444',
+    paddingHorizontal: wp('2%'),
+    paddingVertical: hp('0.5%'),
+    borderRadius: wp('1%'),
+  },
+  removeProductText: {
+    color: '#fff',
+    fontSize: wp('3%'),
+    fontFamily: 'Poppins-Medium',
+  },
+  productContainer: {
+    backgroundColor: '#f8f9fa',
+    padding: wp('3%'),
+    borderRadius: wp('2%'),
+    marginBottom: hp('1%'),
   },
   dropdownArrow: {
     width: 14,
@@ -835,7 +1007,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.BTNRED,
     marginVertical: hp('2%'),
   },
-
   totalSection: {
     marginTop: hp('2%'),
     marginBottom: hp('4%'),

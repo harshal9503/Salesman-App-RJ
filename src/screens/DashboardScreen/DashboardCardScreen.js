@@ -20,7 +20,9 @@ import {
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+
 const API_BASE_URL = 'https://rajmanijewellers.in';
+
 
 const DashboardComponent = () => {
   const [open, setOpen] = useState(false);
@@ -29,6 +31,7 @@ const DashboardComponent = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const navigation = useNavigation();
+
 
   const fetchDashboardData = async selectedDate => {
     try {
@@ -60,28 +63,30 @@ const DashboardComponent = () => {
     }
   };
 
+
   useEffect(() => {
     fetchDashboardData(date);
   }, [date]);
 
+
   const formatAmount = amount => {
-    if (amount == null) return '₹0.00';
+    if (amount == null) return '₹0';
 
-    const amountStr = parseFloat(amount).toFixed(2);
-    const parts = amountStr.split('.');
-    let integerPart = parts[0];
-    const decimalPart = parts.length > 1 ? '.' + parts[1] : '';
+    // Convert amount to string, split at decimal, and take only integer part (truncate decimals)
+    const amountStr = amount.toString().split('.')[0];
 
-    let lastThree = integerPart.substring(integerPart.length - 3);
-    const otherNumbers = integerPart.substring(0, integerPart.length - 3);
+    // Format Indian currency style (with commas)
+    let lastThree = amountStr.substring(amountStr.length - 3);
+    const otherNumbers = amountStr.substring(0, amountStr.length - 3);
     if (otherNumbers !== '') {
       lastThree = ',' + lastThree;
     }
     const formatted =
-      otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + lastThree + decimalPart;
+      otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + lastThree;
 
     return `₹${formatted}`;
   };
+
 
   const renderSection = (title, color, cash, upi, pending, total) => {
     return (
@@ -90,6 +95,7 @@ const DashboardComponent = () => {
           <Text style={styles.titleText}>{title}</Text>
         </View>
 
+
         <View style={styles.totalAmountRow}>
           <Image
             source={require('../../assets/HomeImg/coin.png')}
@@ -97,6 +103,7 @@ const DashboardComponent = () => {
           />
           <Text style={styles.totalAmount}> {formatAmount(total)}</Text>
         </View>
+
 
         <View style={styles.paymentRow}>
           <View style={[styles.paymentBox, { borderColor: color }]}>
@@ -109,6 +116,7 @@ const DashboardComponent = () => {
           </View>
         </View>
 
+
         <View style={[styles.pendingBox, { borderColor: color }]}>
           <Text style={styles.pendingLabel}>Pending</Text>
           <Text style={styles.pendingValue}>{formatAmount(pending)}</Text>
@@ -116,6 +124,7 @@ const DashboardComponent = () => {
       </View>
     );
   };
+
 
   return (
     <>
@@ -128,10 +137,12 @@ const DashboardComponent = () => {
         </TouchableOpacity>
       </View>
 
+
       <ScrollView showsVerticalScrollIndicator={false} style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Dashboard</Text>
         </View>
+
 
         <View style={styles.dateBox}>
           <Text style={styles.dateText}>
@@ -144,8 +155,10 @@ const DashboardComponent = () => {
           </TouchableOpacity>
         </View>
 
+
         {loading && <Text style={{ textAlign: 'center', marginVertical: hp('2%') }}>Loading...</Text>}
         {error && <Text style={{ textAlign: 'center', marginVertical: hp('2%'), color: 'red' }}>{error}</Text>}
+
 
         {dashboardData && dashboardData.success && (
           <>
@@ -186,7 +199,9 @@ const DashboardComponent = () => {
   );
 };
 
+
 export default DashboardComponent;
+
 
 const styles = StyleSheet.create({
   container: {

@@ -6,9 +6,7 @@ import {
   TextInput,
   ScrollView,
   StyleSheet,
-  SafeAreaView,
   Image,
-  StatusBar,
   Alert,
 } from 'react-native';
 import {
@@ -40,32 +38,24 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
   const fetchInvoices = async () => {
     try {
       setLoading(true);
-      console.log('datadata');
       const response = await axios.get(
         `${baseUrl}/salesman/get-all-custom-orders`,
       );
 
-      // 👉 Adjust according to API structure
       const apiData = response.data.data || response.data;
 
-      console.log('datadata', apiData);
-
-      // ✅ Set color based on pending vs totalAmount
       const updatedData = apiData.repairingInvoice.map(item => {
-        let cardColor = '#fdd9d9'; // default purple
+        let cardColor = '#fdd9d9'; // red (not paid at all)
 
         const pending = Number(item.paymentDetails?.pending) || 0;
         const total = Number(item.paymentDetails?.totalAmount) || 0;
 
         if (pending === 0) {
           cardColor = '#c8f2d1'; // green (fully paid)
-          console.log('green', cardColor);
         } else if (pending === total) {
           cardColor = '#fdd9d9'; // red (not paid at all)
-          console.log('red', cardColor);
         } else {
           cardColor = '#dfd8f9'; // purple (partially paid)
-          console.log('purple', cardColor);
         }
 
         return {
@@ -79,6 +69,40 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
       console.error('Error fetching invoices:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const deleteInvoice = async (customOrderId) => {
+    try {
+      Alert.alert(
+        'Confirm Delete',
+        'Are you sure you want to delete this Invoice?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Yes',
+            onPress: async () => {
+              try {
+                const response = await axios.delete(
+                  `${baseUrl}/salesman/delete-custom-orders-by-id/${customOrderId}`
+                );
+                setInvoices(prevInvoices =>
+                  prevInvoices.filter(invoice => invoice._id !== customOrderId)
+                );
+                Alert.alert('Success', 'Invoice deleted successfully');
+              } catch (error) {
+                console.error('Error deleting invoice:', error);
+                Alert.alert('Error', 'Failed to delete invoice');
+              }
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Error in delete confirmation:', error);
     }
   };
 
@@ -124,8 +148,6 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
   const handleInvoicePress = invoice => {
     setSelectedInvoice(invoice);
 
-    console.log('check', invoice);
-
     if (invoice.color === '#c8f2d1') {
       setOpenSaleModal(true);
     } else if (invoice.color === '#fdd9d9') {
@@ -133,6 +155,16 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
     } else {
       setOpenPendingModal(true);
     }
+  };
+
+  // Helper function to format date to 'DD-MM-YYYY'
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    const dateObj = new Date(dateString);
+    const day = ('0' + dateObj.getDate()).slice(-2);
+    const month = ('0' + (dateObj.getMonth() + 1)).slice(-2);
+    const year = dateObj.getFullYear();
+    return `${day}-${month}-${year}`;
   };
 
   return (
@@ -161,18 +193,11 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
 
       <View>
         <View
-          style={{
-            position: 'absolute',
-            top: hp('2.8%'),
-            left: wp('5%'),
-            borderRightWidth: 1,
-            borderColor: '#aaa',
-            paddingHorizontal: wp('2%'),
-          }}
+          style={styles.searchIconContainer}
         >
           <Image
             source={require('../../assets/searchicon.png')}
-            style={{ width: wp('5%'), height: wp('5%') }}
+            style={styles.searchIcon}
           />
         </View>
         <TextInput
@@ -186,7 +211,7 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
 
       <View style={styles.tableHeader}>
         <TouchableOpacity
-          style={{ flexDirection: 'row', gap: 1 }}
+          style={styles.tableHeaderItem}
           onPress={() => {
             setSortField('name');
             setSortOrder(
@@ -197,16 +222,12 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
           <Text style={styles.tableHeaderText}>C Name</Text>
           <Image
             source={require('../../assets/doublearrow.png')}
-            style={{
-              width: wp('2.5%'),
-              height: hp('1%'),
-              marginTop: hp('0.5%'),
-            }}
+            style={styles.sortIcon}
           />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={{ flexDirection: 'row', gap: 1 }}
+          style={styles.tableHeaderItem}
           onPress={() => {
             setSortField('voucher');
             setSortOrder(
@@ -217,16 +238,12 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
           <Text style={styles.tableHeaderText}>Voucher no.</Text>
           <Image
             source={require('../../assets/doublearrow.png')}
-            style={{
-              width: wp('2.5%'),
-              height: hp('1%'),
-              marginTop: hp('0.5%'),
-            }}
+            style={styles.sortIcon}
           />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={{ flexDirection: 'row', gap: 1 }}
+          style={styles.tableHeaderItem}
           onPress={() => {
             setSortField('amount');
             setSortOrder(
@@ -237,75 +254,73 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
           <Text style={styles.tableHeaderText}>Amount</Text>
           <Image
             source={require('../../assets/doublearrow.png')}
-            style={{
-              width: wp('2.5%'),
-              height: hp('1%'),
-              marginTop: hp('0.5%'),
-            }}
+            style={styles.sortIcon}
           />
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scrollArea}>
+      <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
         {filteredInvoices.length === 0 ? (
-    <View style={{ alignItems: 'center', marginTop: hp('5%') }}>
-      <Text style={{ fontSize: wp('4%'), fontFamily: 'Poppins-Medium', color: '#777' }}>
-        No invoices found
-      </Text>
-    </View>
-  ) : (filteredInvoices.map(inv => (
-          <TouchableOpacity
-            key={inv._id || index}
-            onPress={() => handleInvoicePress(inv)}
-          >
-            <View style={[styles.invoiceCard, { backgroundColor: inv.color }]}>
-              <View
-                style={{
-                  backgroundColor: 'yellow',
-                  width: wp('0.9%'),
-                  justifyContent: 'flex-end',
-                  marginRight: wp('6%'),
-                  height: hp('6%'),
-                }}
-              >
-                <View
-                  style={{
-                    width: wp('0.9%'),
-                    height: hp('0.3%'),
-                    backgroundColor: 'red',
-                  }}
-                />
-              </View>
-              <View style={styles.invoiceCardInner}>
-                {/* Left Part */}
-                <View style={{ gap: 1 }}>
-                  <Text style={styles.dateText}>
-                    {inv.invoiceDetails.date?.slice(0, 10)}
-                  </Text>
-                  <Text style={styles.nameText}>
-                    {inv.customerDetails.customerNameEng}
-                  </Text>
-                  <Text style={styles.phoneText}>
-                    +91{inv.customerDetails.mobileNumber}
-                  </Text>
+          <View style={{ alignItems: 'center', marginTop: hp('5%') }}>
+            <Text style={styles.noInvoicesText}>
+              No invoices found
+            </Text>
+          </View>
+        ) : (filteredInvoices.map((inv, index) => (
+          <View key={inv._id || index} style={styles.invoiceCardContainer}>
+            <TouchableOpacity
+              onPress={() => handleInvoicePress(inv)}
+              style={styles.invoiceTouchable}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.invoiceCard, { backgroundColor: inv.color }]}>
+                <View style={styles.sideBar}>
+                  <View style={styles.sideBarInner} />
                 </View>
 
-                {/* Middle Part */}
-                <View style={{ alignItems: 'flex-start' }}>
-                  <Text style={styles.billText}>
-                    {inv.invoiceDetails.voucherNo}
-                  </Text>
-                </View>
+                <View style={styles.invoiceCardInner}>
+                  {/* Left Part */}
+                  <View style={styles.leftPart}>
+                    <Text style={styles.dateText}>
+                      {formatDate(inv.invoiceDetails.date)}
+                    </Text>
+                    <Text style={styles.nameText}>
+                      {inv.customerDetails.customerNameEng}
+                    </Text>
+                    <Text style={styles.phoneText}>
+                      +91{inv.customerDetails.mobileNumber}
+                    </Text>
+                  </View>
 
-                {/* Right Part */}
-                <View style={{ alignItems: 'flex-start' }}>
-                  <Text style={styles.amountText}>
-                    ₹{inv.paymentDetails.totalAmount}
-                  </Text>
+                  {/* Middle Part */}
+                  <View style={styles.middlePart}>
+                    <Text style={styles.billText}>
+                      {inv.invoiceDetails.voucherNo}
+                    </Text>
+                  </View>
+
+                  {/* Right Part */}
+                  <View style={styles.rightPart}>
+                    <Text style={styles.amountText}>
+                      ₹{inv.paymentDetails.totalAmount}
+                    </Text>
+                  </View>
                 </View>
               </View>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+
+            {/* Delete Button */}
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => deleteInvoice(inv._id)}
+              activeOpacity={0.7}
+            >
+              <Image
+                source={require('../../assets/delete.png')}
+                style={styles.deleteIcon}
+              />
+            </TouchableOpacity>
+          </View>
         )))}
       </ScrollView>
 
@@ -313,6 +328,7 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
         <TouchableOpacity
           style={styles.createBtn}
           onPress={() => navigation.navigate('custom-order')}
+          activeOpacity={0.8}
         >
           <Text style={styles.createBtnText}>Create Invoice +</Text>
         </TouchableOpacity>
@@ -349,65 +365,152 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    height: hp('6%'),
+    backgroundColor: '#fff',
+    paddingHorizontal: wp('3%'),
+  },
+  backButtonTouch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backarrow: {
+    width: wp('4.5%'),
+    height: wp('4.5%'),
+    resizeMode: 'contain',
+    marginRight: wp('2%'),
+  },
+  backText: {
+    fontSize: wp('4%'),
+    fontFamily: 'Poppins-Bold',
+    color: '#000',
+  },
   header: {
-    padding: wp('4%'),
+    paddingHorizontal: wp('4%'),
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: wp('2%'),
+    height: hp('6%'),
   },
   headerTitle: {
     fontSize: wp('4.2%'),
     fontFamily: 'Poppins-Bold',
     color: '#000',
   },
+  searchIconContainer: {
+    position: 'absolute',
+    top: hp('2.8%'),
+    left: wp('5%'),
+    borderRightWidth: 1,
+    borderColor: '#aaa',
+    paddingHorizontal: wp('2%'),
+    height: hp('5.5%'),
+    justifyContent: 'center',
+  },
+  searchIcon: {
+    width: wp('5%'),
+    height: wp('5%'),
+  },
   searchInput: {
-    margin: wp('4%'),
+    marginHorizontal: wp('4%'),
+    marginTop: hp('2.5%'),
+    marginBottom: hp('1.5%'),
     borderWidth: 1,
     borderColor: '#aaa',
     borderRadius: wp('2%'),
     paddingLeft: wp('13%'),
     color: '#000',
     fontFamily: 'Poppins-Regular',
-    height: wp('9%'),
-
-    // ✅ Add these to align text vertically center
-    paddingVertical: 0, // Avoid default padding interference
-    textAlignVertical: 'center', // Android-specific
-    justifyContent: 'center', // Optional, in case parent View matters
+    height: hp('5.5%'),
+    paddingVertical: 0,
+    textAlignVertical: 'center',
   },
   tableHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: wp('6%'),
+    justifyContent: 'space-around',
     backgroundColor: '#eee',
-    paddingVertical: hp('1%'),
+    paddingVertical: hp('1.5%'),
+  },
+  tableHeaderItem: {
+    width: wp('28%'), // square width based on screen width
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: wp('1.2%'),
   },
   tableHeaderText: {
     fontFamily: 'Poppins-SemiBold',
     fontSize: wp('3.2%'),
-    marginLeft: wp('2%'),
     color: '#000',
+  },
+  sortIcon: {
+    width: wp('2.5%'),
+    height: hp('1%'),
+    resizeMode: 'contain',
+    marginTop: hp('0.5%'),
   },
   scrollArea: {
     flex: 1,
   },
-  invoiceCardInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: wp('2%'),
-    justifyContent: 'space-between',
-    width: '92%',
+  invoiceCardContainer: {
+    position: 'relative',
+    marginHorizontal: wp('4%'),
+    marginVertical: hp('0.6%'),
+  },
+  invoiceTouchable: {
+    flex: 1,
   },
   invoiceCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: wp('4%'),
-    marginVertical: hp('0.5%'),
-    borderRadius: wp('2.5%'),
-    paddingVertical: hp('1%'),
-    paddingHorizontal: wp('2%'),
-    backgroundColor: '#f5f5f5', // sample default
+    borderRadius: wp('1.5%'),
+    paddingVertical: hp('1.2%'),
+    paddingRight: wp('3%'),
+    backgroundColor: '#f5f5f5',
+    shadowColor: "#000",
+    shadowOffset: { width: 1, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  sideBar: {
+    backgroundColor: 'yellow',
+    width: wp('0.9%'),
+    justifyContent: 'flex-end',
+    marginRight: wp('5%'),
+    height: hp('6%'),
+    borderRadius: wp('0.4%'),
+    overflow: 'hidden',
+  },
+  sideBarInner: {
+    width: wp('0.9%'),
+    height: hp('0.3%'),
+    backgroundColor: 'red',
+  },
+  invoiceCardInner: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  leftPart: {
+    width: wp('28%'),
+    justifyContent: 'center',
+    gap: hp('0.22%'),
+  },
+  middlePart: {
+    width: wp('28%'),
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rightPart: {
+    width: wp('28%'),
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   dateText: {
     fontSize: wp('2.65%'),
@@ -425,16 +528,29 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Medium',
   },
   billText: {
-    alignSelf: 'center',
     fontFamily: 'Poppins-SemiBold',
     fontSize: wp('3.5%'),
     color: '#000',
   },
   amountText: {
-    alignSelf: 'center',
     fontFamily: 'Poppins-SemiBold',
     fontSize: wp('3.5%'),
     color: '#000',
+  },
+  deleteButton: {
+    position: 'absolute',
+    top: hp('0.5%'),
+    right: wp('1.5%'),
+    zIndex: 10,
+    padding: wp('1%'),
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderRadius: wp('2%'),
+  },
+  deleteIcon: {
+    width: wp('4.5%'),
+    height: wp('4.5%'),
+    resizeMode: 'contain',
+    tintColor: '#ff3b30',
   },
   footer: {
     padding: wp('3%'),
@@ -442,7 +558,7 @@ const styles = StyleSheet.create({
   },
   createBtn: {
     backgroundColor: Colors.PRIMARY,
-    padding: wp('4%'),
+    paddingVertical: hp('1.5%'),
     borderRadius: wp('2.5%'),
     alignItems: 'center',
     marginBottom: hp('5%'),
@@ -452,28 +568,9 @@ const styles = StyleSheet.create({
     fontSize: wp('4.2%'),
     fontFamily: 'Poppins-Bold',
   },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    height: hp('6%'),
-    backgroundColor: '#fff',
-    padding: 5,
-    paddingHorizontal: 10,
-  },
-  backButtonTouch: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backarrow: {
-    width: wp('4.5%'),
-    height: wp('4.5%'),
-    resizeMode: 'contain',
-    marginRight: wp('2%'),
-  },
-  backText: {
+  noInvoicesText: {
     fontSize: wp('4%'),
-    fontFamily: 'Poppins-Bold',
-    color: '#000',
+    fontFamily: 'Poppins-Medium',
+    color: '#777',
   },
 });

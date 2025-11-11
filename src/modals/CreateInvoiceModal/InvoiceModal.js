@@ -1,3 +1,6 @@
+// InvoiceModal.js
+
+
 import React from 'react';
 import {
   Modal,
@@ -12,13 +15,49 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { Colors } from '../../constants/Colors';
 
-const { width } = Dimensions.get('window');
+
+const { width, height } = Dimensions.get('window');
+
 
 const InvoiceModal = ({ visible, onClose, invoice }) => {
   const navigation = useNavigation();
-  console.log("Modal invoice", invoice);
+
 
   if (!invoice) return null;
+
+
+  const products = invoice.productDetails || [];
+
+
+  // Helper to format amount with "₹" AFTER number (no decimals in amount and total)
+  const formatAmountWithSymbolAfter = amount => {
+    if (amount === undefined || amount === null) return 'N/A';
+    return `₹ ${Math.floor(amount)}`;
+  };
+
+
+  // FIXED: Function to handle edit navigation with proper invoiceId
+  const handleEditInvoice = () => {
+    console.log('Invoice object:', invoice);
+    console.log('Invoice ID to pass:', invoice.invoiceId || invoice._id);
+    
+    // Use invoiceId if available, otherwise use _id as fallback
+    const invoiceIdToPass = invoice.invoiceId || invoice._id;
+    
+    if (!invoiceIdToPass) {
+      alert('Invoice ID is missing. Cannot edit invoice.');
+      return;
+    }
+    
+    // Close modal first
+    onClose();
+    
+    // Navigate with proper invoiceId parameter
+    navigation.navigate('update-invoice', {
+      invoiceId: invoiceIdToPass
+    });
+  };
+
 
   return (
     <Modal visible={visible} animationType="fade" transparent>
@@ -28,16 +67,21 @@ const InvoiceModal = ({ visible, onClose, invoice }) => {
           <TouchableOpacity style={styles.closeIcon} onPress={onClose}>
             <Image
               source={require('../../assets/modalclose.png')}
-              style={{ width: 20, height: 20 }}
+              style={{ width: 20, height: 20 ,marginBottom:5}}
               resizeMode="contain"
             />
           </TouchableOpacity>
 
-          <ScrollView showsVerticalScrollIndicator={false}>
-            {/* Edit Button */}
+
+          <ScrollView
+            contentContainerStyle={styles.scrollContentContainer}
+            showsVerticalScrollIndicator={true}
+            nestedScrollEnabled={true}
+          >
+            {/* Edit Button - FIXED with proper navigation */}
             <TouchableOpacity
               style={styles.editBtn}
-              onPress={() => navigation.navigate('create-invoice')}
+              onPress={handleEditInvoice}
             >
               <View style={styles.editBtnContent}>
                 <Text style={styles.editText}>Edit Invoice</Text>
@@ -48,93 +92,87 @@ const InvoiceModal = ({ visible, onClose, invoice }) => {
               </View>
             </TouchableOpacity>
 
-            {/* Title */}
-            <Text style={styles.title}>
-              {invoice.productDetails?.[0]?.productName || 'N/A'}
-            </Text>
 
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            {/* Title */}
+            <Text style={styles.title}>Invoice Details</Text>
+
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
               <View style={{ flexDirection: 'row' }}>
-                <Text style={styles.label}>Order</Text>
-                <Text style={{ color: '#aaa', fontSize: 15, fontWeight: 'bold' }}>
-                  {invoice.invoiceDetails?.billNo || 'N/A'}
-                </Text>
+                <Text style={styles.label}>Order Id:</Text>
+                <Text style={styles.infoText}>{invoice.orderNumber || 'N/A'}</Text>
               </View>
               <View style={{ flexDirection: 'row', gap: 20 }}>
-                <Text style={{ marginLeft: 20, fontSize: 15, fontWeight: '800' }}>
-                  Tag Id
-                </Text>
-                <Text style={{ color: '#aaa', fontSize: 15, fontWeight: 'bold' }}>
-                  {invoice.productDetails?.[0]?.tagNo || 'N/A'}
-                </Text>
+                <Text style={{ marginLeft: 20, fontSize: 15, fontWeight: '800' }}>Tag Id</Text>
+                <Text style={styles.infoText}>{products.length > 0 ? products[0].tagNo || 'N/A' : 'N/A'}</Text>
               </View>
             </View>
 
-            {/* Detail Items */}
-            {[
-              {
-                label: 'Name:',
-                value: invoice.customerDetails?.customerNameEng || 'N/A',
-              },
-              {
-                label: 'Contact:',
-                value: invoice.customerDetails?.mobileNumber
-                  ? `+91${invoice.customerDetails.mobileNumber}`
-                  : 'N/A',
-              },
-              {
-                label: 'Address:',
-                value: invoice.customerDetails?.address || 'N/A',
-              },
-              {
-                label: 'Product:',
-                value: invoice.productDetails?.[0]?.productName || 'N/A',
-              },
-              {
-                label: 'Gross Wt.:',
-                value: invoice.productDetails?.[0]?.grossWeightInGrams ?? 'N/A',
-              },
-              {
-                label: 'Net Wt.:',
-                value: invoice.productDetails?.[0]?.netWeightInGrams ?? 'N/A',
-              },
-              {
-                label: 'Status:',
-                value: invoice.productDetails?.[0]?.customOrderStatus || 'N/A',
-                color: '#0DC143',
-                bold: true,
-              },
-              {
-                label: 'Amount:',
-                value:
-                  invoice.productDetails?.[0]?.finalAmount !== undefined
-                    ? `₹${invoice.productDetails[0].finalAmount}`
-                    : 'N/A',
-              },
-            ].map((item, index) => (
-              <View style={styles.detailContainer} key={index}>
-                <Text style={styles.label}>{item.label}</Text>
-                <Text
-                  style={[
-                    styles.value,
-                    item.color && { color: item.color },
-                    item.bold && { fontWeight: 'bold' },
-                  ]}
-                >
-                  {item.value}
-                </Text>
-              </View>
-            ))}
+
+            {/* Customer Details */}
+            <View style={styles.detailContainer}>
+              <Text style={styles.label}>Name:</Text>
+              <Text style={styles.value}>{invoice.customerDetails?.customerNameEng || 'N/A'}</Text>
+            </View>
+            <View style={styles.detailContainer}>
+              <Text style={styles.label}>Contact:</Text>
+              <Text style={styles.value}>
+                {invoice.customerDetails?.mobileNumber ? `+91${invoice.customerDetails.mobileNumber}` : 'N/A'}
+              </Text>
+            </View>
+            <View style={styles.detailContainer}>
+              <Text style={styles.label}>Address:</Text>
+              <Text style={styles.value}>{invoice.customerDetails?.address || 'N/A'}</Text>
+            </View>
+
+
+            {/* Products List */}
+            <Text style={styles.productsTitle}>Products</Text>
+            {products.length === 0 ? (
+              <Text style={{ textAlign: 'center', color: '#888', marginVertical: 12 }}>
+                No products available
+              </Text>
+            ) : (
+              products.map((product, index) => (
+                <View style={styles.productBox} key={index}>
+                  <Text style={styles.productName}>{product.productName || 'N/A'}</Text>
+                  <View style={styles.productDetailsRow}>
+                    <View style={styles.productDetailColumn}>
+                      <Text style={styles.detailLabel}>Gross Wt.</Text>
+                      <Text style={styles.detailValue}>
+                        {product.grossWeightInGrams !== undefined ? product.grossWeightInGrams : 'N/A'}
+                      </Text>
+                    </View>
+                    <View style={styles.productDetailColumn}>
+                      <Text style={styles.detailLabel}>Net Wt.</Text>
+                      <Text style={styles.detailValue}>
+                        {product.netWeightInGrams !== undefined ? product.netWeightInGrams : 'N/A'}
+                      </Text>
+                    </View>
+                    <View style={styles.productDetailColumn}>
+                      <Text style={styles.detailLabel}>Amount</Text>
+                      <Text style={styles.detailValue}>
+                        {product.finalAmount !== undefined ? formatAmountWithSymbolAfter(product.finalAmount) : 'N/A'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ))
+            )}
+
 
             {/* Total */}
-            <View style={styles.detailContainer}>
+            <View style={styles.totalContainer}>
               <Text style={styles.totalLabel}>Total:</Text>
               <Text style={styles.totalValue}>
-                {invoice.paymentDetails?.finalAmount
-                  ? `₹${invoice.paymentDetails.finalAmount}`
+                {invoice.paymentDetails?.payableAmount !== undefined
+                  ? formatAmountWithSymbolAfter(invoice.paymentDetails.payableAmount)
+                  : invoice.paymentDetails?.finalAmount !== undefined
+                  ? formatAmountWithSymbolAfter(invoice.paymentDetails.finalAmount)
                   : 'N/A'}
               </Text>
             </View>
+
 
             {/* Generate Invoice Button */}
             <TouchableOpacity
@@ -156,7 +194,9 @@ const InvoiceModal = ({ visible, onClose, invoice }) => {
   );
 };
 
+
 export default InvoiceModal;
+
 
 const styles = StyleSheet.create({
   overlay: {
@@ -167,12 +207,15 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: width * 0.94,
+    maxHeight: height * 0.85,
     backgroundColor: '#fff',
     borderRadius: 4,
     paddingHorizontal: 14,
-    paddingVertical: 40,
-    maxHeight: '90%',
+    paddingVertical: 30,
     position: 'relative',
+  },
+  scrollContentContainer: {
+    paddingBottom: 24,
   },
   closeIcon: {
     position: 'absolute',
@@ -186,10 +229,12 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginBottom: 16,
     alignItems: 'center',
+    marginTop: 10,
   },
   editBtnContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    
   },
   editText: {
     color: '#fff',
@@ -208,34 +253,86 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 16,
   },
-  detailContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 3,
-  },
   label: {
     fontFamily: 'Poppins-SemiBold',
     color: '#000',
     width: 90,
     fontSize: 15,
   },
+  infoText: {
+    color: '#aaa',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  detailContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 3,
+  },
   value: {
     color: '#aaa',
     fontFamily: 'Poppins-Medium',
     flex: 1,
-    textAlign: 'left',
     fontSize: 15,
+  },
+  productsTitle: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 17,
+    marginTop: 10,
+    marginBottom: 8,
+    color: '#222',
+    textAlign: 'center',
+  },
+  productBox: {
+    backgroundColor: '#f8f8f8',
+    borderRadius: 8,
+    padding: 14,
+    marginBottom: 10,
+  },
+  productName: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 16,
+    marginBottom: 10,
+    color: Colors.PRIMARY,
+  },
+  productDetailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  productDetailColumn: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  detailLabel: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 13,
+    color: '#555',
+    marginBottom: 4,
+  },
+  detailValue: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 14,
+    color: '#000',
+  },
+  totalContainer: {
+    flexDirection: 'row',
+    marginTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#ddd',
+    paddingTop: 14,
+    alignItems: 'center',
   },
   totalLabel: {
     fontSize: 22,
     color: '#000',
-    width: 90,
     fontFamily: 'Poppins-SemiBold',
+    width: 90,
   },
   totalValue: {
     fontFamily: 'Poppins-SemiBold',
     fontSize: 22,
-    color: '#aaa',
+    color: '#444',
     flex: 1,
     textAlign: 'left',
   },
@@ -243,7 +340,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'red',
     paddingVertical: 13,
     borderRadius: 6,
-    marginTop: 16,
+    marginTop: 24,
     alignItems: 'center',
   },
   invoiceBtnContent: {

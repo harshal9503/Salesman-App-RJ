@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Image,
   Platform,
+  Alert,
 } from 'react-native';
 import {
   widthPercentageToDP as wp,
@@ -15,12 +16,11 @@ import {
 } from 'react-native-responsive-screen';
 import { Colors } from '../../constants/Colors';
 import axios from 'axios';
-import { baseUrl } from '../../api/baseurl';
-import PLRepairingModal from '../../modals/CreateInvoiceModal/PLRepairingModal';
-import InvoiceModal from '../../modals/CreateInvoiceModal/InvoiceModal';
-import downRed from '../../assets/dropdownicon.png';
-import downGreen from '../../assets/greendrop.png';
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import InvoiceModal from '../../modals/CreateInvoiceModal/InvoiceModal';
+import PLRepairingModal from '../../modals/CreateInvoiceModal/PLRepairingModal';
 
 const CARD_COLORS = {
   fullyPaid: '#c8f2d1',
@@ -29,7 +29,18 @@ const CARD_COLORS = {
   default: '#f1d3d3',
 };
 
-const CustomOrderInvoiceScreen = ({ navigation }) => {
+// Helper to format date as DD-MM-YYYY
+const formatDate = isoDate => {
+  if (!isoDate) return '';
+  const d = new Date(isoDate);
+  if (isNaN(d)) return '';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
+const CustomOrderInvoiceScreen = ({ navigation, route }) => {
   const [searchText, setSearchText] = useState('');
   const [openSaleModal, setOpenSaleModal] = useState(false);
   const [openRepairModal, setOpenRepairModal] = useState(false);
@@ -37,11 +48,21 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
   const [invoices, setInvoices] = useState([]);
   const [repairInvoices, setRepairInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [sortField, setSortField] = useState(null); // 'customerNameEng' | 'billNo' | 'finalAmount'
-  const [sortOrder, setSortOrder] = useState('asc'); // 'asc' | 'desc'
+  const [sortField, setSortField] = useState(null);
+  const [sortOrder, setSortOrder] = useState('asc');
   const [selectedTab, setSelectedTab] = useState('Sale');
   const [cardColors, setCardColors] = useState({});
   const [openDropdownId, setOpenDropdownId] = useState(null);
+
+  useEffect(() => {
+    if (route.params?.showRepairTab) {
+      setSelectedTab('Repair');
+    }
+    if (route.params?.refresh) {
+      fetchInvoices();
+      fetchRepairInvoices();
+    }
+  }, [route.params]);
 
   useEffect(() => {
     fetchInvoices();
@@ -51,12 +72,10 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
   const fetchInvoices = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${baseUrl}/salesman/get-all-invoices`);
+      const response = await axios.get('https://rajmanijewellers.in/api/salesman/get-all-invoices');
       const apiData = response.data.data || response.data;
-      console.log('get all invoices', apiData);
       const updatedData = apiData.map(item => {
-        // Example logic - currently hardcoded paid status as 'Completed'
-        const paid = 'Completed';
+        const paid = item.status || 'Completed';
         let cardColor = CARD_COLORS.default;
         if (paid === 'In-Progress') {
           cardColor = CARD_COLORS.partiallyPaid;
@@ -80,13 +99,11 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
 
   const fetchRepairInvoices = async () => {
     try {
-      const response = await axios.get(
-        `${baseUrl}/salesman/get-all-repair-invoices`,
-      );
-      console.log('get all repair invoices', response.data.repairingInvoice);
-      setRepairInvoices(response.data.repairingInvoice);
+      const response = await axios.get('https://rajmanijewellers.in/api/salesman/get-all-repair-invoices');
+      const apiData = response.data.repairingInvoice || [];
+      setRepairInvoices(apiData.reverse());
     } catch (error) {
-      console.error('Error fetching repairing:', error);
+      console.error('Error fetching repairing invoices:', error);
     }
   };
 
@@ -100,11 +117,11 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
         valA = a.customerDetails?.customerNameEng?.toLowerCase() || '';
         valB = b.customerDetails?.customerNameEng?.toLowerCase() || '';
       } else if (sortField === 'billNo') {
-        valA = a.invoiceDetails?.billNo || '';
-        valB = b.invoiceDetails?.billNo || '';
+        valA = a.orderNumber || '';
+        valB = b.orderNumber || '';
       } else if (sortField === 'finalAmount') {
-        valA = Number(a.paymentDetails?.finalAmount) || 0;
-        valB = Number(b.paymentDetails?.finalAmount) || 0;
+        valA = Number(a.paymentDetails?.payableAmount) || 0;
+        valB = Number(b.paymentDetails?.payableAmount) || 0;
       }
       if (typeof valA === 'string' && typeof valB === 'string') {
         return sortOrder === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
@@ -117,53 +134,16 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
     return sortInvoices(
       invoices.filter(inv => {
         const name = inv.customerDetails?.customerNameEng?.toLowerCase() || '';
-        const voucher = String(inv.invoiceDetails?.voucherNo || '').toLowerCase();
-        const amount = String(inv.paymentDetails?.totalAmount || '').toLowerCase();
+        const orderNumber = String(inv.orderNumber || '').toLowerCase();
+        const amount = String(inv.paymentDetails?.payableAmount || '').toLowerCase();
         return (
           name.includes(searchText.toLowerCase()) ||
-          voucher.includes(searchText.toLowerCase()) ||
+          orderNumber.includes(searchText.toLowerCase()) ||
           amount.includes(searchText.toLowerCase())
         );
       }),
     );
   }, [invoices, searchText, sortField, sortOrder]);
-
-  const handleInvoicePress = invoice => {
-    setSelectedInvoice(invoice);
-    if (invoice.color === CARD_COLORS.fullyPaid) {
-      setOpenSaleModal(true);
-    } else {
-      setOpenRepairModal(true);
-    }
-  };
-
-  const handleStatusChange = async (id, status) => {
-    setCardColors(prevColors => {
-      const updatedColors = {
-        ...prevColors,
-        [id]: status === 'deliver' ? CARD_COLORS.fullyPaid : CARD_COLORS.notPaid,
-      };
-      AsyncStorage.setItem('cardColors', JSON.stringify(updatedColors)).catch(
-        err => console.error('Error saving card colors:', err),
-      );
-      return updatedColors;
-    });
-    setOpenDropdownId(null);
-  };
-
-  useEffect(() => {
-    const loadColors = async () => {
-      try {
-        const savedColors = await AsyncStorage.getItem('cardColors');
-        if (savedColors) {
-          setCardColors(JSON.parse(savedColors));
-        }
-      } catch (err) {
-        console.error('Error loading card colors:', err);
-      }
-    };
-    loadColors();
-  }, []);
 
   const filteredRepairInvoices = useMemo(() => {
     return repairInvoices.filter(inv => {
@@ -177,6 +157,69 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
       );
     });
   }, [repairInvoices, searchText]);
+
+  const handleInvoicePress = invoice => {
+    setSelectedInvoice(invoice);
+    if (selectedTab === 'Sale') {
+      setOpenSaleModal(true);
+    } else {
+      setOpenRepairModal(true);
+    }
+  };
+
+  const deleteSaleInvoice = async (invoiceId) => {
+    try {
+      Alert.alert(
+        'Confirm Delete',
+        'Are you sure you want to delete this Sale Invoice?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Yes',
+            onPress: async () => {
+              try {
+                await axios.delete(`https://rajmanijewellers.in/api/salesman/delete-invoice-by-id/${invoiceId}`);
+                setInvoices(prev => prev.filter(i => i._id !== invoiceId));
+                Alert.alert('Success', 'Invoice deleted successfully');
+              } catch (error) {
+                console.error('Error deleting sale invoice:', error);
+                Alert.alert('Error', 'Failed to delete sale invoice');
+              }
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Delete confirmation error:', error);
+    }
+  };
+
+  const deleteRepairInvoice = async (repairInvoiceId) => {
+    try {
+      Alert.alert(
+        'Confirm Delete',
+        'Are you sure you want to delete this Repair Invoice?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Yes',
+            onPress: async () => {
+              try {
+                await axios.delete(`https://rajmanijewellers.in/api/salesman/delete-repair-invoice-by-id/${repairInvoiceId}`);
+                setRepairInvoices(prev => prev.filter(i => i._id !== repairInvoiceId));
+                Alert.alert('Success', 'Repair invoice deleted successfully');
+              } catch (error) {
+                console.error('Error deleting repair invoice:', error);
+                Alert.alert('Error', 'Failed to delete repair invoice');
+              }
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Delete confirmation error:', error);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -292,55 +335,68 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
             </View>
           ) : (
             filteredInvoices.map(inv => (
-              <TouchableOpacity
-                key={inv._id}
-                onPress={() => handleInvoicePress(inv)}
-              >
-                <View
-                  style={[styles.invoiceCard, { backgroundColor: inv.color }]}
+              <View key={inv._id} style={styles.invoiceCardContainer}>
+                <TouchableOpacity
+                  onPress={() => handleInvoicePress(inv)}
+                  style={styles.invoiceTouchable}
+                  activeOpacity={0.8}
                 >
-                  <View
-                    style={{
-                      backgroundColor: 'yellow',
-                      width: wp('0.9%'),
-                      justifyContent: 'flex-end',
-                      marginRight: wp('6%'),
-                      height: hp('6%'),
-                    }}
-                  >
+                  <View style={[styles.invoiceCard, { backgroundColor: inv.color }]}>
                     <View
                       style={{
+                        backgroundColor: 'yellow',
                         width: wp('0.9%'),
-                        height: hp('0.3%'),
-                        backgroundColor: 'red',
+                        justifyContent: 'flex-end',
+                        marginRight: wp('6%'),
+                        height: hp('6%'),
                       }}
-                    />
+                    >
+                      <View
+                        style={{
+                          width: wp('0.9%'),
+                          height: hp('0.3%'),
+                          backgroundColor: 'red',
+                        }}
+                      />
+                    </View>
+                    <View style={styles.invoiceCardInner}>
+                      <View style={{ gap: 1 }}>
+                        <Text style={styles.dateText}>
+                          {formatDate(inv.invoiceDetails.date)}
+                        </Text>
+                        <Text style={styles.nameText}>
+                          {inv.customerDetails.customerNameEng}
+                        </Text>
+                        <Text style={styles.phoneText}>
+                          +91{inv.customerDetails.mobileNumber}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-start' }}>
+                        <Text style={styles.billText} numberOfLines={1} adjustsFontSizeToFit>
+                          {inv.orderNumber || 'N/A'}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-start' }}>
+                        <Text style={styles.amountText}>
+                          ₹{Math.floor(inv.paymentDetails?.payableAmount || 0)}
+                        </Text>
+                      </View>
+                    </View>
                   </View>
-                  <View style={styles.invoiceCardInner}>
-                    <View style={{ gap: 1 }}>
-                      <Text style={styles.dateText}>
-                        {inv.invoiceDetails.date?.slice(0, 10)}
-                      </Text>
-                      <Text style={styles.nameText}>
-                        {inv.customerDetails.customerNameEng}
-                      </Text>
-                      <Text style={styles.phoneText}>
-                        +91{inv.customerDetails.mobileNumber}
-                      </Text>
-                    </View>
-                    <View style={{ alignItems: 'flex-start' }}>
-                      <Text style={styles.billText}>
-                        {inv.invoiceDetails.billNo}
-                      </Text>
-                    </View>
-                    <View style={{ alignItems: 'flex-start' }}>
-                      <Text style={styles.amountText}>
-                        ₹{inv.paymentDetails.totalPaid}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
+
+                {/* Delete Button */}
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => deleteSaleInvoice(inv._id)}
+                  activeOpacity={0.7}
+                >
+                  <Image
+                    source={require('../../assets/delete.png')}
+                    style={styles.deleteIcon}
+                  />
+                </TouchableOpacity>
+              </View>
             ))
           )}
         </ScrollView>
@@ -355,101 +411,80 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
                   color: '#777',
                 }}
               >
-                No invoices found
+                No repair invoices found
               </Text>
             </View>
           ) : (
-            filteredRepairInvoices.map(inv => (
-              <TouchableOpacity
-                key={inv._id}
-                onPress={() => handleInvoicePress(inv)}
-              >
-                <View
-                  style={[
-                    styles.invoiceCard,
-                    {
-                      backgroundColor:
-                        cardColors[inv._id] === CARD_COLORS.notPaid
-                          ? '#e7c8c8'
-                          : '#bbebc6',
-                    },
-                  ]}
-                >
+            filteredRepairInvoices.map(inv => {
+              const color =
+                cardColors[inv._id] === CARD_COLORS.fullyPaid
+                  ? CARD_COLORS.fullyPaid
+                  : CARD_COLORS.notPaid;
+              return (
+                <View key={inv._id} style={styles.invoiceCardContainer}>
                   <TouchableOpacity
-                    onPress={() =>
-                      setOpenDropdownId(
-                        openDropdownId === inv._id ? null : inv._id,
-                      )
-                    }
-                    style={[
-                      styles.minibtn,
-                      {
-                        borderWidth: 1,
-                        borderColor:
-                          cardColors[inv._id] === CARD_COLORS.notPaid
-                            ? '#fc0101ff'
-                            : '#10e83fff',
-                      },
-                    ]}
+                    onPress={() => handleInvoicePress(inv)}
+                    style={styles.invoiceTouchable}
+                    activeOpacity={0.8}
                   >
-                    <Text
-                      style={[
-                        styles.minibtntext,
-                        {
-                          color:
-                            cardColors[inv._id] === CARD_COLORS.notPaid
-                              ? '#fc0101ff'
-                              : '#10e83fff',
-                        },
-                      ]}
-                    >
-                      {cardColors[inv._id] === CARD_COLORS.notPaid
-                        ? 'Pen'
-                        : 'Del'}
-                    </Text>
+                    <View style={[styles.invoiceCard, { backgroundColor: color }]}>
+                      <View
+                        style={{
+                          backgroundColor: 'yellow',
+                          width: wp('0.9%'),
+                          justifyContent: 'flex-end',
+                          marginRight: wp('6%'),
+                          height: hp('6%'),
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: wp('0.9%'),
+                            height: hp('0.3%'),
+                            backgroundColor: 'red',
+                          }}
+                        />
+                      </View>
+                      <View style={styles.invoiceCardInner}>
+                        <View style={{ gap: 1 }}>
+                          <Text style={styles.dateText}>
+                            {formatDate(inv.invoiceDetails.date)}
+                          </Text>
+                          <Text style={styles.nameText}>
+                            {inv.customerDetails.customerNameEng}
+                          </Text>
+                          <Text style={styles.phoneText}>
+                            +91{inv.customerDetails.mobileNumber}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-start' }}>
+                          <Text style={styles.billText} numberOfLines={1} adjustsFontSizeToFit>
+                            {inv.orderNumber || 'N/A'}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-start' }}>
+                          <Text style={styles.amountText}>
+                            ₹{Math.floor(inv.paymentDetails?.payableAmount || 0)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Delete Button */}
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={() => deleteRepairInvoice(inv._id)}
+                    activeOpacity={0.7}
+                  >
                     <Image
-                      source={
-                        cardColors[inv._id] === CARD_COLORS.notPaid
-                          ? downRed
-                          : downGreen
-                      }
-                      style={[styles.downImg]}
+                      source={require('../../assets/delete.png')}
+                      style={styles.deleteIcon}
                     />
                   </TouchableOpacity>
-                  <View style={styles.invoiceCardInner}>
-                    <View>
-                      <Text style={styles.dateText}>
-                        {inv.invoiceDetails.date.slice(0, 10)}
-                      </Text>
-                      <Text style={styles.nameText}>
-                        {inv.customerDetails.customerNameEng}
-                      </Text>
-                      <Text style={styles.phoneText}>
-                        +91{inv.customerDetails.mobileNumber}
-                      </Text>
-                    </View>
-                    <Text style={styles.billText}>RJ-001</Text>
-                    <Text style={styles.amountText}>
-                      ₹{inv.paymentDetails.payableAmount}
-                    </Text>
-                  </View>
                 </View>
-                {openDropdownId === inv._id && (
-                  <View style={[styles.dropdownContainer]}>
-                    <TouchableOpacity
-                      onPress={() => handleStatusChange(inv._id, 'deliver')}
-                    >
-                      <Text style={styles.dropdownOption}>Deliver</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleStatusChange(inv._id, 'pending')}
-                    >
-                      <Text style={styles.dropdownOption}>Pending</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </TouchableOpacity>
-            ))
+              );
+            })
           )}
         </ScrollView>
       )}
@@ -457,19 +492,23 @@ const CustomOrderInvoiceScreen = ({ navigation }) => {
       <View style={styles.footer}>
         <TouchableOpacity
           style={styles.createBtn}
-          onPress={() => navigation.navigate('create-invoice')}
+          onPress={() =>
+            selectedTab === 'Sale'
+              ? navigation.navigate('create-invoice')
+              : navigation.navigate('repairing-screen')
+          }
         >
           <Text style={styles.createBtnText}>Create Invoice +</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Display the invoice modal with selected invoice details */}
       <InvoiceModal
         visible={openSaleModal}
         onClose={() => setOpenSaleModal(false)}
         invoice={selectedInvoice}
         type="Sale"
       />
+
       <PLRepairingModal
         visible={openRepairModal}
         onClose={() => setOpenRepairModal(false)}
@@ -556,8 +595,9 @@ const styles = StyleSheet.create({
   billText: {
     alignSelf: 'center',
     fontFamily: 'Poppins-SemiBold',
-    fontSize: wp('3.5%'),
+    fontSize: wp('4%'),
     color: '#000',
+    maxWidth: wp('20%'),
   },
   amountText: {
     alignSelf: 'center',
@@ -629,36 +669,19 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: '#fff',
   },
-  minibtn: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-    gap: 6,
-    width: 35,
-    height: 16,
-    marginLeft: 10,
-    borderRadius: 6,
-    marginRight: 10,
-  },
-  downImg: { width: 7, height: 4 },
-  minibtntext: {
-    fontSize: 8,
-  },
-  dropdownContainer: {
+  deleteButton: {
     position: 'absolute',
-    top: 60,
-    left: 40,
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 4,
-    zIndex: 999,
-    elevation: 10,
+    top: hp('0.9%'),
+    right: wp('5.5%'),  // shifted more left from 1.5% to 4%
+    zIndex: 10,
+    padding: wp('1%'),
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderRadius: wp('2%'),
   },
-  dropdownOption: {
-    paddingVertical: 5,
-    fontSize: 14,
-    color: '#000',
+  deleteIcon: {
+    width: wp('4.3%'),
+    height: wp('4.3%'),
+    resizeMode: 'contain',
+    tintColor: '#ff3b30',
   },
 });

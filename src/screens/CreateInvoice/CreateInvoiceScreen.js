@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,10 @@ import {
   Alert,
   StatusBar,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Keyboard,
+  TouchableWithoutFeedback,
+  Dimensions,
 } from 'react-native';
 import {
   widthPercentageToDP as wp,
@@ -22,6 +26,8 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import moment from 'moment';
 
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
 const CreateInvoiceScreen = ({ navigation }) => {
   const [expanded, setExpanded] = useState(true);
   const [productForm, setProductForm] = useState(false);
@@ -30,10 +36,10 @@ const CreateInvoiceScreen = ({ navigation }) => {
   const [purityDrop, setPurityDrop] = useState(false);
   const [labourTypeDrop, setLabourTypeDrop] = useState(false);
   const [showData, setShowData] = useState(false);
-  const [valueType, setValueType] = useState('');
+  const [valueType, setValueType] = useState('Sales'); // Default to Sales
   const [valuePurity, setValuePurity] = useState('');
   const [labourType, setLabourType] = useState('');
-  const [inputClearType, setInputClearType] = useState(true);
+  const [inputClearType, setInputClearType] = useState(false); // Set to false since we have default
   const [inputClearPurity, setInputClearPurity] = useState(true);
   const [inputClearLabourType, setInputClearLabourType] = useState(true);
 
@@ -56,7 +62,6 @@ const CreateInvoiceScreen = ({ navigation }) => {
     address: '',
   });
   const [products, setProducts] = useState([]);
-  const [productDetails, setProductDetails] = useState([]);
   const [expandedProductIndices, setExpandedProductIndices] = useState([]);
   const [liveRate, setLiveRate] = useState();
   const [piece, setPiece] = useState(0);
@@ -65,6 +70,15 @@ const CreateInvoiceScreen = ({ navigation }) => {
 
   const [liveGoldRate, setLiveGoldRate] = useState(null);
   const [goldRateLoading, setGoldRateLoading] = useState(true);
+
+  // Refs for auto-focus and keyboard handling
+  const scrollViewRef = useRef(null);
+  const inputRefs = useRef({});
+
+  // Product name suggestions
+  const [productNameSuggestions, setProductNameSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestionIndex, setSuggestionIndex] = useState(-1);
 
   const lastIndex = products.length - 1;
 
@@ -79,6 +93,13 @@ const CreateInvoiceScreen = ({ navigation }) => {
   useEffect(() => {
     fetchBillNo();
   }, []);
+
+  // Auto-close other products when adding new one
+  useEffect(() => {
+    if (products.length > 0) {
+      setExpandedProductIndices([]);
+    }
+  }, [products.length]);
 
   const generateDefaultBillNo = async () => {
     try {
@@ -95,30 +116,21 @@ const CreateInvoiceScreen = ({ navigation }) => {
     }
   };
 
-  // CORRECTED getLiveGoldRate function with full URL
+  // Function to fetch live gold rate
   const getLiveGoldRate = async () => {
-    console.log('🔄 Starting gold rate fetch...');
     setGoldRateLoading(true);
-    
+
     try {
-      // Get token with better validation
       const token = await AsyncStorage.getItem('userToken');
-      console.log('🔑 Token found:', token ? 'Yes' : 'No');
-      console.log('🔑 Token value:', token ? token.substring(0, 20) + '...' : 'null');
-      
       if (!token || token.trim() === '' || token === 'null' || token === 'undefined') {
-        console.error('❌ No valid token found for gold rate fetch');
         setLiveGoldRate(null);
         setGoldRateLoading(false);
         Alert.alert('Authentication Error', 'Please login again to fetch gold rates');
         return;
       }
 
-      // Use full URL directly instead of baseUrl
       const fullApiUrl = 'https://rajmanijewellers.in/api/salesman/get-latest-gold-price';
-      console.log('📡 Making API call to:', fullApiUrl);
-      
-      // Create axios config with timeout and proper headers
+
       const config = {
         method: 'GET',
         url: fullApiUrl,
@@ -128,96 +140,46 @@ const CreateInvoiceScreen = ({ navigation }) => {
           'Accept': 'application/json',
           'User-Agent': 'RajmaniJewellers-Mobile-App',
         },
-        timeout: 20000, // 20 second timeout
-        validateStatus: function (status) {
-          return status >= 200 && status < 300; // default
-        },
+        timeout: 20000,
       };
-
-      console.log('📋 Request config:', {
-        url: config.url,
-        method: config.method,
-        headers: {
-          ...config.headers,
-          Authorization: config.headers.Authorization ? `Bearer ${config.headers.Authorization.substring(7, 27)}...` : 'Missing'
-        },
-        timeout: config.timeout
-      });
 
       const response = await axios(config);
 
-      console.log('✅ Gold rate API response status:', response.status);
-      console.log('📊 Gold rate API response headers:', response.headers);
-      console.log('🗂️ Response content-type:', response.headers['content-type']);
-      
-      // Check if response is JSON
       const contentType = response.headers['content-type'];
       if (!contentType || !contentType.includes('application/json')) {
-        console.error('❌ Invalid content type received:', contentType);
-        console.log('📄 Response data (first 500 chars):', JSON.stringify(response.data).substring(0, 500));
         setLiveGoldRate(null);
         setGoldRateLoading(false);
         Alert.alert('API Error', 'Server returned invalid response format. Please try again later.');
         return;
       }
 
-      console.log('📊 Gold rate API response data:', JSON.stringify(response.data, null, 2));
-      
-      // Validate response structure
       if (response.data && typeof response.data === 'object') {
         if (response.data.status === true && response.data.data) {
           const goldData = response.data.data;
-          
-          // Validate that required price fields exist for 18k, 20k, 22k, 24k only
           const requiredFields = ['price18k', 'price20k', 'price22k', 'price24k'];
           const missingFields = requiredFields.filter(field => !goldData[field]);
-          
+
           if (missingFields.length === 0) {
             setLiveGoldRate(response.data);
-            console.log('💰 Live gold rates set successfully:');
-            console.log('  - 18k:', goldData.price18k);
-            console.log('  - 20k:', goldData.price20k);
-            console.log('  - 22k:', goldData.price22k);
-            console.log('  - 24k:', goldData.price24k);
           } else {
-            console.warn('⚠️ Missing required price fields:', missingFields);
-            console.warn('📊 Available data:', goldData);
             setLiveGoldRate(null);
             Alert.alert('Data Error', `Missing gold rate data for: ${missingFields.join(', ')}`);
           }
         } else {
-          console.warn('⚠️ Invalid API response structure:');
-          console.warn('  - Status:', response.data.status);
-          console.warn('  - Has data property:', !!response.data.data);
-          console.warn('  - Full response:', response.data);
           setLiveGoldRate(null);
           Alert.alert('API Error', 'Invalid gold rate data format received from server');
         }
       } else {
-        console.error('❌ Response data is not a valid object:', typeof response.data);
-        console.log('📄 Raw response:', response.data);
         setLiveGoldRate(null);
         Alert.alert('API Error', 'Invalid response format received from server');
       }
-      
     } catch (error) {
-      console.error('❌ Error fetching gold rate:');
-      
       if (error.code === 'ECONNABORTED') {
-        console.error('  - Request timeout after 20 seconds');
         Alert.alert('Timeout Error', 'Request timed out. Please check your internet connection and try again.');
       } else if (error?.response) {
-        console.error('  - HTTP Status:', error.response.status);
-        console.error('  - Status Text:', error.response.statusText);
-        console.error('  - Response Headers:', error.response.headers);
-        console.error('  - Response Data Type:', typeof error.response.data);
-        console.error('  - Response Data:', JSON.stringify(error.response.data).substring(0, 500));
-        
-        // Handle specific HTTP errors
         switch (error.response.status) {
           case 401:
             Alert.alert('Authentication Error', 'Your session has expired. Please login again.');
-            // Navigate to login screen if needed
             break;
           case 403:
             Alert.alert('Permission Error', 'You do not have permission to access gold rates.');
@@ -232,19 +194,13 @@ const CreateInvoiceScreen = ({ navigation }) => {
             Alert.alert('HTTP Error', `Server responded with status ${error.response.status}. Please try again.`);
         }
       } else if (error?.request) {
-        console.error('  - Request made but no response received');
-        console.error('  - Network Error Details:', error.message);
         Alert.alert('Network Error', 'No response from server. Please check your internet connection.');
       } else {
-        console.error('  - Request setup error:', error.message);
-        console.error('  - Full error object:', error);
         Alert.alert('Request Error', `Failed to setup request: ${error.message}`);
       }
-      
       setLiveGoldRate(null);
     } finally {
       setGoldRateLoading(false);
-      console.log('🏁 Gold rate fetch completed');
     }
   };
 
@@ -265,28 +221,41 @@ const CreateInvoiceScreen = ({ navigation }) => {
     }
   };
 
-  const toggleDropdownCustom = () => setExpanded(prev => !prev);
+  const toggleDropdownCustom = () => {
+    setExpanded(prev => !prev);
+    // Close all products when opening customer details
+    setExpandedProductIndices([]);
+  };
+
   const toggleProductExpansion = index => {
     setExpandedProductIndices(prev =>
       prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
     );
+    // Close customer details when opening any product
+    setExpanded(false);
   };
+
   const handleTypeDropOpen = () => setTypeDrop(!typeDrop);
   const handlePurityDropOpen = () => setPurityDrop(!purityDrop);
   const handleLabourTypeDropOpen = () => setLabourTypeDrop(!labourTypeDrop);
 
+  // Close all dropdowns when tapping outside
+  const handleTapOutside = () => {
+    setTypeDrop(false);
+    setPurityDrop(false);
+    setLabourTypeDrop(false);
+    setShowSuggestions(false);
+  };
+
   const removeProduct = index => {
-    const updatedProducts = [...productDetails];
+    const updatedProducts = [...products];
     updatedProducts.splice(index, 1);
-    setProductDetails(updatedProducts);
     setProducts(updatedProducts);
-    
-    // Adjust expanded indices after removal
-    setExpandedProductIndices(prev => 
+
+    setExpandedProductIndices(prev =>
       prev.map(i => i > index ? i - 1 : i).filter(i => i !== index)
     );
-    
-    // Remove errors for this product index and adjust remaining indices
+
     setErrorsProduct(prevErrors => {
       const newErrors = {};
       Object.keys(prevErrors).forEach(key => {
@@ -301,7 +270,6 @@ const CreateInvoiceScreen = ({ navigation }) => {
     });
   };
 
-  // New function to discard current product form
   const discardCurrentProduct = () => {
     Alert.alert(
       'Discard Product',
@@ -319,18 +287,15 @@ const CreateInvoiceScreen = ({ navigation }) => {
               const updatedProducts = [...products];
               updatedProducts.splice(lastIndex, 1);
               setProducts(updatedProducts);
-              setProductDetails(updatedProducts);
-              
-              // Clear form state
+
               setProductForm(updatedProducts.length > 0 && !hasCompleteProduct(updatedProducts[updatedProducts.length - 1]));
-              setInputClearType(true);
+              setInputClearType(false); // Keep default as Sales
               setInputClearPurity(true);
               setInputClearLabourType(true);
-              setValueType('');
+              setValueType('Sales'); // Reset to default
               setValuePurity('');
               setLabourType('');
-              
-              // Clear errors for discarded product
+
               setErrorsProduct(prevErrors => {
                 const newErrors = { ...prevErrors };
                 delete newErrors[lastIndex];
@@ -344,60 +309,123 @@ const CreateInvoiceScreen = ({ navigation }) => {
     );
   };
 
-  // Helper function to check if product has complete data
-  const hasCompleteProduct = (product) => {
-    return product && (product.type || product.productName || product.purity || product.finalAmount);
+  // Product name suggestion handler
+  const handleProductNameInput = (value, index = lastIndex) => {
+    // Convert to uppercase for product name
+    const upperValue = value.toUpperCase();
+    handleChange(index, 'productName', upperValue);
+    
+    if (upperValue && upperValue.length > 0) {
+      const suggestions = ['OLD GOLD', 'OLD SILVER'].filter(item =>
+        item.toLowerCase().includes(upperValue.toLowerCase())
+      );
+      setProductNameSuggestions(suggestions);
+      setShowSuggestions(suggestions.length > 0);
+      setSuggestionIndex(index);
+    } else {
+      setShowSuggestions(false);
+      setProductNameSuggestions([]);
+    }
   };
 
-  // FIXED: Function to ensure proper decimal values for weight and labour percentage fields
-  const ensureProperDecimal = (value) => {
-    // Check if value is null, undefined, or not a string
-    if (value == null || value === undefined) {
+  const selectProductSuggestion = (suggestion, index = lastIndex) => {
+    handleChange(index, 'productName', suggestion);
+    setShowSuggestions(false);
+    setProductNameSuggestions([]);
+  };
+
+  // Updated to consider only required fields for "complete product"
+  const hasCompleteProduct = (product) => {
+    // Product is considered complete if productName and type are filled
+    return product && product.type && product.productName && product.productName.trim() !== '';
+  };
+
+  // Helper function to check if product has any data entered
+  const hasAnyProductData = (product) => {
+    if (!product) return false;
+    return (
+      product.type ||
+      (product.productName && product.productName.trim() !== '') ||
+      product.tagNo ||
+      product.remark ||
+      product.purity ||
+      product.piece ||
+      product.grossWeightInGrams ||
+      product.netWeightInGrams ||
+      product.lessWeightInGrams ||
+      product.ratePerGram ||
+      product.stoneRate ||
+      product.labourChargesInPercentage ||
+      product.labourChargesInGram ||
+      product.additionalAmount ||
+      product.discountAmount
+    );
+  };
+
+  // Updated helper function to format decimal numbers with 3 digits after decimal for weight fields
+  const formatDecimalDisplay = (value, isWeight = false) => {
+    if (value == null || value === undefined || value === '') {
       return '';
     }
     
-    // Convert to string if it's not already
+    const numValue = parseFloat(value);
+    if (isNaN(numValue)) {
+      return '';
+    }
+    
+    // Format to show exactly 3 decimal places for weight fields, 2 for others
+    return numValue.toFixed(isWeight ? 3 : 2);
+  };
+
+  // UPDATED: Modified helper functions for input sanitizing to allow decimals for ratePerGram, labour charges, and labourChargesInRs
+  const ensureProperDecimal = (value, isWeight = false, allowMoreDecimals = false) => {
+    if (value == null || value === undefined) {
+      return '';
+    }
     const stringValue = String(value);
     
-    // Remove any non-numeric characters except decimal point
+    // Allow only numbers and decimal point
     let cleanValue = stringValue.replace(/[^0-9.]/g, '');
     
-    // Handle multiple decimal points - only allow one
+    // Handle multiple decimal points
     const parts = cleanValue.split('.');
     if (parts.length > 2) {
       cleanValue = parts[0] + '.' + parts.slice(1).join('');
     }
     
-    // If value starts with decimal point, add 0 before it
+    // Handle leading decimal point
     if (cleanValue.startsWith('.')) {
       cleanValue = '0' + cleanValue;
     }
     
-    // If value is just a decimal point or empty, return appropriate value
+    // Handle empty or just decimal point
     if (cleanValue === '.' || cleanValue === '') {
       return '';
     }
     
-    // Ensure only two decimal places
+    // Limit decimal places based on field type
+    let maxDecimals;
+    if (isWeight) {
+      maxDecimals = 3; // Weight fields: 3 decimal places
+    } else if (allowMoreDecimals) {
+      maxDecimals = 6; // Rate per gram and labour charges: up to 6 decimal places
+    } else {
+      maxDecimals = 2; // Other decimal fields: 2 decimal places
+    }
+    
     const decimalParts = cleanValue.split('.');
-    if (decimalParts.length === 2 && decimalParts[1].length > 2) {
-      cleanValue = decimalParts[0] + '.' + decimalParts[1].substring(0, 2);
+    if (decimalParts.length === 2 && decimalParts[1].length > maxDecimals) {
+      cleanValue = decimalParts[0] + '.' + decimalParts[1].substring(0, maxDecimals);
     }
     
     return cleanValue;
   };
 
-  // FIXED: Function to ensure non-negative integer values (no decimals)
   const ensureNonNegativeInteger = (value) => {
-    // Check if value is null, undefined, or not a string
     if (value == null || value === undefined) {
       return '0';
     }
-    
-    // Convert to string if it's not already
     const stringValue = String(value);
-    
-    // Remove any non-numeric characters
     const cleanValue = stringValue.replace(/[^0-9]/g, '');
     const numValue = parseInt(cleanValue) || 0;
     return Math.max(0, numValue).toString();
@@ -405,75 +433,101 @@ const CreateInvoiceScreen = ({ navigation }) => {
 
   const handleChange = (index, key, value) => {
     const updatedProducts = [...products];
+
+    const weightFields = ['grossWeightInGrams', 'netWeightInGrams', 'lessWeightInGrams'];
+    const decimalFields = ['labourChargesInPercentage'];
+    const integerFields = ['piece', 'stoneRate', 'additionalAmount', 'discountAmount', 'value', 'finalAmount'];
     
-    // Define which fields should accept decimals and which should be integers
-    const decimalFields = ['grossWeightInGrams', 'netWeightInGrams', 'lessWeightInGrams', 'labourChargesInPercentage', 'labourChargesInGram'];
-    const integerFields = ['piece', 'stoneRate', 'additionalAmount', 'discountAmount', 'ratePerGram', 'value', 'finalAmount', 'labourChargeInRupees'];
-    
-    // Apply appropriate formatting based on field type
-    if (decimalFields.includes(key)) {
-      value = ensureProperDecimal(value);
+    // UPDATED: Special decimal fields that allow more decimal places - now includes labourChargesInRs
+    const extendedDecimalFields = ['ratePerGram', 'labourChargesInGram', 'labourChargesInRs'];
+
+    // For productName, tagNo, and remark, convert to uppercase
+    if (key === 'productName' || key === 'tagNo' || key === 'remark') {
+      value = value.toUpperCase();
+    }
+
+    if (weightFields.includes(key)) {
+      value = ensureProperDecimal(value, true); // 3 decimals for weight
+    } else if (decimalFields.includes(key)) {
+      value = ensureProperDecimal(value, false); // 2 decimals for other decimal fields
+    } else if (extendedDecimalFields.includes(key)) {
+      value = ensureProperDecimal(value, false, true); // Up to 6 decimals for rate per gram and labour charges
     } else if (integerFields.includes(key)) {
       value = ensureNonNegativeInteger(value);
     }
-    
+
     updatedProducts[index][key] = value;
 
-    // Auto-calculate less weight
-    if (key === 'grossWeightInGrams' || key === 'netWeightInGrams') {
-      const gross = parseFloat(updatedProducts[index].grossWeightInGrams) || 0;
-      const net = parseFloat(updatedProducts[index].netWeightInGrams) || 0;
-      const diff = gross - net > 0 ? (gross - net).toFixed(2) : '0.00';
-      updatedProducts[index].lessWeightInGrams = diff;
-    }
-
-    const net = parseFloat(updatedProducts[index].netWeightInGrams) || 0;
-    const rate = parseInt(updatedProducts[index].ratePerGram) || 0;
-    const stoneRate = parseInt(updatedProducts[index].stoneRate) || 0;
-    const labourPercentage = parseFloat(updatedProducts[index].labourChargesInPercentage) || 0;
-    const labourGram = parseFloat(updatedProducts[index].labourChargesInGram) || 0;
-    const addl = parseInt(updatedProducts[index].additionalAmount) || 0;
-    const disc = parseInt(updatedProducts[index].discountAmount) || 0;
-
-    // Calculate value without decimals (for gold, rate is per gram)
-    updatedProducts[index].value = Math.floor(net * rate).toString();
-
-    // Calculate labour charge in rupees based on selected type
-    if (labourType === 'percentage' && key === 'labourChargesInPercentage') {
-      updatedProducts[index].labourChargesInGram = '';
-      const labourAmount = Math.floor((labourPercentage / 100) * parseInt(updatedProducts[index].value || 0));
-      updatedProducts[index].labourChargeInRupees = labourAmount.toString();
-    } else if (labourType === 'gram' && key === 'labourChargesInGram') {
-      updatedProducts[index].labourChargesInPercentage = '';
-      const labourAmount = Math.floor(labourGram * net);
-      updatedProducts[index].labourChargeInRupees = labourAmount.toString();
-    } else if (!value && (key === 'labourChargesInPercentage' || key === 'labourChargesInGram')) {
-      if (key === 'labourChargesInPercentage' && labourGram) {
-        updatedProducts[index].labourChargeInRupees = Math.floor(labourGram * net).toString();
-      } else if (key === 'labourChargesInGram' && labourPercentage) {
-        const labourAmount = Math.floor((labourPercentage / 100) * parseInt(updatedProducts[index].value || 0));
-        updatedProducts[index].labourChargeInRupees = labourAmount.toString();
-      } else {
-        updatedProducts[index].labourChargeInRupees = '0';
+    // Auto-calculation logic only triggers if not directly editing calculated fields
+    if (key !== 'netWeightInGrams' && key !== 'value' && key !== 'finalAmount' && key !== 'labourChargesInRs') {
+      // MODIFIED: New calculation logic - Gross Weight - Less Weight = Net Weight
+      if (key === 'grossWeightInGrams' || key === 'lessWeightInGrams') {
+        const gross = parseFloat(updatedProducts[index].grossWeightInGrams) || 0;
+        const less = parseFloat(updatedProducts[index].lessWeightInGrams) || 0;
+        // Calculate net weight: Gross - Less = Net
+        const netCalculated = (gross - less).toFixed(3);
+        updatedProducts[index].netWeightInGrams = netCalculated;
       }
-    } else if (labourType === 'percentage' && labourPercentage && key !== 'labourChargesInGram') {
-      const labourAmount = Math.floor((labourPercentage / 100) * parseInt(updatedProducts[index].value || 0));
-      updatedProducts[index].labourChargeInRupees = labourAmount.toString();
-    } else if (labourType === 'gram' && labourGram && key !== 'labourChargesInPercentage') {
-      updatedProducts[index].labourChargeInRupees = Math.floor(labourGram * net).toString();
+
+      // Use net weight for calculations (which is now the calculated field)
+      const net = parseFloat(updatedProducts[index].netWeightInGrams) || 0;
+      const rate = parseFloat(updatedProducts[index].ratePerGram) || 0; // CHANGED: Now parseFloat for decimal rates
+      const stoneRate = parseInt(updatedProducts[index].stoneRate) || 0;
+      const labourPercentage = parseFloat(updatedProducts[index].labourChargesInPercentage) || 0;
+      const labourGram = parseFloat(updatedProducts[index].labourChargesInGram) || 0; // CHANGED: Now parseFloat for decimal labour charges
+      const labourRupees = parseFloat(updatedProducts[index].labourChargesInRs) || 0; // FIXED: Now using labourChargesInRs
+      const addl = parseInt(updatedProducts[index].additionalAmount) || 0;
+      const disc = parseInt(updatedProducts[index].discountAmount) || 0;
+
+      // CHANGED: Use parseFloat for value calculation to handle decimal rates
+      updatedProducts[index].value = Math.floor(net * rate).toString();
+
+      // Handle labour charges calculation
+      const currentLabourType = updatedProducts[index].labourType || labourType;
+      
+      if (currentLabourType === 'percentage' && key === 'labourChargesInPercentage') {
+        updatedProducts[index].labourChargesInGram = '';
+        const labourAmount = Math.floor((labourPercentage / 100) * parseInt(updatedProducts[index].value || 0));
+        // UPDATED: Set to empty string instead of '0' when no value
+        updatedProducts[index].labourChargesInRs = labourAmount > 0 ? labourAmount.toString() : '';
+      } else if (currentLabourType === 'gram' && key === 'labourChargesInGram') {
+        updatedProducts[index].labourChargesInPercentage = '';
+        // CHANGED: Use parseFloat for labour amount calculation to handle decimal labour charges
+        const labourAmount = Math.floor(labourGram * net);
+        // UPDATED: Set to empty string instead of '0' when no value
+        updatedProducts[index].labourChargesInRs = labourAmount > 0 ? labourAmount.toString() : '';
+      } else if (!value && (key === 'labourChargesInPercentage' || key === 'labourChargesInGram')) {
+        if (key === 'labourChargesInPercentage' && labourGram) {
+          const labourAmount = Math.floor(labourGram * net);
+          // UPDATED: Set to empty string instead of '0' when no value
+          updatedProducts[index].labourChargesInRs = labourAmount > 0 ? labourAmount.toString() : '';
+        } else if (key === 'labourChargesInGram' && labourPercentage) {
+          const labourAmount = Math.floor((labourPercentage / 100) * parseInt(updatedProducts[index].value || 0));
+          // UPDATED: Set to empty string instead of '0' when no value
+          updatedProducts[index].labourChargesInRs = labourAmount > 0 ? labourAmount.toString() : '';
+        } else {
+          // UPDATED: Set to empty string instead of '0' when no value
+          updatedProducts[index].labourChargesInRs = '';
+        }
+      } else if (currentLabourType === 'percentage' && labourPercentage && key !== 'labourChargesInGram') {
+        const labourAmount = Math.floor((labourPercentage / 100) * parseInt(updatedProducts[index].value || 0));
+        // UPDATED: Set to empty string instead of '0' when no value
+        updatedProducts[index].labourChargesInRs = labourAmount > 0 ? labourAmount.toString() : '';
+      } else if (currentLabourType === 'gram' && labourGram && key !== 'labourChargesInPercentage') {
+        const labourAmount = Math.floor(labourGram * net);
+        // UPDATED: Set to empty string instead of '0' when no value
+        updatedProducts[index].labourChargesInRs = labourAmount > 0 ? labourAmount.toString() : '';
+      }
+
+      const val = parseInt(updatedProducts[index].value) || 0;
+      const lab = parseFloat(updatedProducts[index].labourChargesInRs) || 0; // FIXED: Now using labourChargesInRs
+
+      const finalAmount = Math.max(0, val + stoneRate + lab + addl - disc);
+      updatedProducts[index].finalAmount = finalAmount.toString();
     }
-
-    const val = parseInt(updatedProducts[index].value) || 0;
-    const lab = parseInt(updatedProducts[index].labourChargeInRupees) || 0;
-
-    // Ensure final amount is not negative and no decimals
-    const finalAmount = Math.max(0, val + stoneRate + lab + addl - disc);
-    updatedProducts[index].finalAmount = finalAmount.toString();
 
     setProducts(updatedProducts);
-    setProductDetails(updatedProducts);
 
-    // Clear error on this field if any
     setErrorsProduct(prevErrors => {
       const productErrors = { ...(prevErrors[index] || {}) };
       if (productErrors[key]) {
@@ -486,7 +540,6 @@ const CreateInvoiceScreen = ({ navigation }) => {
   const handleInvoiceDetailsChange = (key, value) => {
     setInvoiceDetails(prev => ({ ...prev, [key]: value }));
 
-    // Clear invoice errors when input changes
     setErrorsInvoice(prev => {
       if (prev[key]) {
         const newErrors = { ...prev };
@@ -500,7 +553,6 @@ const CreateInvoiceScreen = ({ navigation }) => {
   const handleCustomerDetailsChange = (key, value) => {
     setCustomerDetails(prev => ({ ...prev, [key]: value }));
 
-    // Clear customer errors when input changes
     setErrorsCustomer(prev => {
       if (prev[key]) {
         const newErrors = { ...prev };
@@ -511,43 +563,44 @@ const CreateInvoiceScreen = ({ navigation }) => {
     });
   };
 
-  const toggleDropdownType = item => {
-    setValueType(item);
-    handleChange(lastIndex, 'type', item);
+  const toggleDropdownType = (item, index = lastIndex) => {
+    if (index === lastIndex) {
+      setValueType(item);
+      setInputClearType(false);
+    }
+    handleChange(index, 'type', item);
     setTypeDrop(false);
-    setInputClearType(false);
   };
 
-  // UPDATED: Modified to handle Silver selection without auto-filling rates
-  const toggleDropdownPurity = item => {
-    setValuePurity(item);
+  const toggleDropdownPurity = (item, index = lastIndex) => {
+    if (index === lastIndex) {
+      setValuePurity(item);
+      setInputClearPurity(false);
+    }
 
     let rateValue = '';
     let purityValue = item;
 
-    // Handle Silver differently - no numeric conversion and no rate auto-fill
     if (item === 'Silver') {
       purityValue = 'Silver';
-      rateValue = ''; // Don't auto-fill rate for silver
+      rateValue = '';
     } else {
-      // For gold purities (18k, 20k, 22k, 24k)
       const numericPurity = parseInt(item.replace('k', ''));
       purityValue = numericPurity;
 
-      // Only auto-fill rates for gold (18k, 20k, 22k, 24k)
       if (liveGoldRate && liveGoldRate.data) {
         switch (item) {
           case '18k':
-            rateValue = Math.floor(liveGoldRate.data.price18k / 10);
+            rateValue = (liveGoldRate.data.price18k / 10).toString(); // CHANGED: Keep as string to preserve decimals
             break;
           case '20k':
-            rateValue = Math.floor(liveGoldRate.data.price20k / 10);
+            rateValue = (liveGoldRate.data.price20k / 10).toString();
             break;
           case '22k':
-            rateValue = Math.floor(liveGoldRate.data.price22k / 10);
+            rateValue = (liveGoldRate.data.price22k / 10).toString();
             break;
           case '24k':
-            rateValue = Math.floor(liveGoldRate.data.price24k / 10);
+            rateValue = (liveGoldRate.data.price24k / 10).toString();
             break;
           default:
             rateValue = '';
@@ -555,29 +608,36 @@ const CreateInvoiceScreen = ({ navigation }) => {
       }
     }
 
-    handleChange(lastIndex, 'purity', purityValue);
-    handleChange(lastIndex, 'ratePerGram', rateValue);
+    handleChange(index, 'purity', purityValue);
+    handleChange(index, 'ratePerGram', rateValue);
     setPurityDrop(false);
-    setInputClearPurity(false);
   };
 
-  const toggleDropdownLabourType = item => {
-    setLabourType(item);
-    setLabourTypeDrop(false);
-    setInputClearLabourType(false);
+  const toggleDropdownLabourType = (item, index = lastIndex) => {
+    if (index === lastIndex) {
+      setLabourType(item);
+      setInputClearLabourType(false);
+    }
     
-    // Clear both labour fields when switching type
-    handleChange(lastIndex, 'labourChargesInPercentage', '');
-    handleChange(lastIndex, 'labourChargesInGram', '');
-    handleChange(lastIndex, 'labourChargeInRupees', '0');
+    // Store labour type for the specific product
+    const updatedProducts = [...products];
+    updatedProducts[index].labourType = item;
+    setProducts(updatedProducts);
+    
+    setLabourTypeDrop(false);
+
+    handleChange(index, 'labourChargesInPercentage', '');
+    handleChange(index, 'labourChargesInGram', '');
+    // UPDATED: Set to empty string instead of '0' when clearing labour type
+    handleChange(index, 'labourChargesInRs', '');
   };
 
-  // Calculate totals for all products
+  // Updated calculateTotals function to properly calculate grand total
   const calculateTotals = () => {
-    const totalAmount = products.reduce((sum, product) => {
-      return sum + (parseInt(product.finalAmount) || 0);
-    }, 0);
-
+    let totalSalesAmount = 0;
+    let totalPurchaseAmount = 0;
+    let grandTotal = 0; // This will be the final calculation
+    
     const totalPieces = products.reduce((sum, product) => {
       return sum + (parseInt(product.piece) || 0);
     }, 0);
@@ -586,34 +646,49 @@ const CreateInvoiceScreen = ({ navigation }) => {
       return sum + (parseFloat(product.netWeightInGrams) || 0);
     }, 0);
 
+    // Calculate totals for all products (including incomplete ones with finalAmount)
+    products.forEach(product => {
+      const amount = parseInt(product.finalAmount) || 0;
+      if (amount > 0) { // Only count products with actual amounts
+        if (product.type === 'Sales') {
+          totalSalesAmount += amount;
+          grandTotal += amount; // Add sales to grand total
+        } else if (product.type === 'Purchase') {
+          totalPurchaseAmount += amount;
+          grandTotal -= amount; // Subtract purchase from grand total
+        }
+      }
+    });
+
     return {
-      totalAmount: totalAmount.toString(),
+      totalSalesAmount: totalSalesAmount.toString(),
+      totalPurchaseAmount: totalPurchaseAmount.toString(),
+      grandTotal: grandTotal.toString(),
       totalPieces,
-      totalNetWeight: totalNetWeight.toFixed(2),
+      totalNetWeight: formatDecimalDisplay(totalNetWeight.toString(), true),
     };
   };
 
-  // UPDATED: Format the data with optional remark/remarks handling - both can be empty
   const formatInvoiceData = () => {
+    // Process customer names - set defaults if empty
+    const processedCustomerDetails = {
+      customerNameEng: customerDetails.customerNameEng.trim() || 'Cash',
+      customerNameHin: customerDetails.customerNameHin.trim() || 'नगदी ग्राहक',
+      address: customerDetails.address || '',
+      mobileNumber: customerDetails.mobileNumber || ''
+    };
+
     const formattedData = {
       invoiceDetails: {
         billNo: invoiceDetails.billNo,
         date: new Date(invoiceDetails.date).toISOString(),
-        // UPDATED: Make remarks completely optional - if empty, send empty string or omit
         remarks: invoiceDetails.remarks || "Invoice created from mobile app"
       },
-      customerDetails: {
-        // UPDATED: Allow both customer names to be empty - send "Cash" if both are empty
-        customerNameEng: customerDetails.customerNameEng.trim() || 'Cash',
-        customerNameHin: customerDetails.customerNameHin.trim() || 'Cash',
-        address: customerDetails.address || '', // Allow empty address
-        mobileNumber: customerDetails.mobileNumber || '' // Allow empty mobile
-      },
+      customerDetails: processedCustomerDetails,
       productDetails: products.map(product => ({
         type: product.type,
-        tagNo: product.tagNo || '', // Allow empty tagNo
+        tagNo: product.tagNo || '',
         productName: product.productName,
-        // UPDATED: Make remark completely optional - if empty, send empty string
         remark: product.remark || '',
         purity: product.purity ? product.purity.toString() : '',
         piece: parseInt(product.piece) || 0,
@@ -622,39 +697,63 @@ const CreateInvoiceScreen = ({ navigation }) => {
         lessWeightInGrams: parseFloat(product.lessWeightInGrams) || 0,
         stoneRate: parseInt(product.stoneRate) || 0,
         labourChargesInPercentage: parseFloat(product.labourChargesInPercentage) || 0,
-        labourChargesInGram: parseFloat(product.labourChargesInGram) || 0,
-        ratePerGram: parseInt(product.ratePerGram) || 0,
+        labourChargesInGram: parseFloat(product.labourChargesInGram) || 0, // CHANGED: Now parseFloat for decimal values
+        ratePerGram: parseFloat(product.ratePerGram) || 0, // CHANGED: Now parseFloat for decimal values
         additionalAmount: parseInt(product.additionalAmount) || 0,
-        discountAmount: parseInt(product.discountAmount) || 0
+        discountAmount: parseInt(product.discountAmount) || 0,
+        labourChargesInRs: parseFloat(product.labourChargesInRs) || 0 // FIXED: Changed to labourChargesInRs
       }))
     };
 
     return formattedData;
   };
 
-  // Helper function to check if any product is of type "Purchase"
   const hasPurchaseProduct = () => {
     return products.some(product => product.type === 'Purchase');
   };
 
-  // UPDATED: Modified navigation function with activity indicator and auto-fill logic for customer names
+  // NEW: Function to scroll to specific input
+  const scrollToInput = (inputKey) => {
+    setTimeout(() => {
+      if (inputRefs.current[inputKey] && scrollViewRef.current) {
+        inputRefs.current[inputKey].measureLayout(
+          scrollViewRef.current,
+          (x, y) => {
+            scrollViewRef.current.scrollTo({
+              y: Math.max(0, y - hp('20%')),
+              animated: true,
+            });
+          },
+          () => {}
+        );
+      }
+    }, 100);
+  };
+
+  // NEW: Handle input focus with proper scrolling
+  const handleInputFocus = (inputKey) => {
+    scrollToInput(inputKey);
+  };
+
+  // NEW: Focus on specific product field
+  const focusOnProductField = (index, fieldName) => {
+    const inputKey = `product_${index}_${fieldName}`;
+    if (inputRefs.current[inputKey]) {
+      inputRefs.current[inputKey].focus();
+    }
+  };
+
   const navigateToPayment = async () => {
     let valid = true;
     let invoiceErrors = {};
     let customerErrors = {};
     let productErrors = {};
 
-    // Check if any product is Purchase type - if so, skip customer validation completely
     const isPurchaseInvoice = hasPurchaseProduct();
 
-    // Customer details validation - COMPLETELY SKIPPED for Purchase invoices
-    // UPDATED: For Sales invoices, ALL customer details are now optional (no validation needed)
-    if (!isPurchaseInvoice) {
-      // All customer details are now optional - no validation required
-      // This includes: customerNameEng, customerNameHin, mobileNumber, and address
-    }
+    // Customer validation skipped for purchase invoices
+    // For sales invoices, all customer details optional (no validation)
 
-    // Validate invoice details only if previous valid
     if (valid) {
       if (!invoiceDetails.billNo.trim()) {
         invoiceErrors.billNo = true;
@@ -667,7 +766,6 @@ const CreateInvoiceScreen = ({ navigation }) => {
       }
     }
 
-    // Validate products only if previous valid
     if (valid) {
       const validProducts = products.filter(p => hasCompleteProduct(p));
       if (validProducts.length === 0) {
@@ -677,49 +775,21 @@ const CreateInvoiceScreen = ({ navigation }) => {
         for (let i = 0; i < validProducts.length; i++) {
           const p = validProducts[i];
           let prodError = {};
+          // Only productName and type are required fields:
           if (!p.type) prodError.type = true;
           if (!p.productName || p.productName.trim() === '') prodError.productName = true;
-          if (!p.purity) prodError.purity = true;
-          if (!p.piece || p.piece === '' || Number(p.piece) <= 0) prodError.piece = true;
-          if (!p.grossWeightInGrams || p.grossWeightInGrams === '' || Number(p.grossWeightInGrams) <= 0)
-            prodError.grossWeightInGrams = true;
-          if (!p.netWeightInGrams || p.netWeightInGrams === '' || Number(p.netWeightInGrams) <= 0)
-            prodError.netWeightInGrams = true;
-          if (!p.ratePerGram || p.ratePerGram === '' || Number(p.ratePerGram) <= 0) prodError.ratePerGram = true;
-
-          // UPDATED: No validation for remark field - it's completely optional
+          // Other fields like purity, piece, weights etc. are optional and do not trigger errors
 
           if (Object.keys(prodError).length > 0) {
             valid = false;
             productErrors[i] = prodError;
 
-            // Show specific alerts for the first invalid product encountered
             if (Object.keys(prodError).includes('type')) {
               Alert.alert('Attention', `Please select the type for product ${i + 1}`);
               break;
             }
             if (Object.keys(prodError).includes('productName')) {
               Alert.alert('Attention', `Please enter the product name for product ${i + 1}`);
-              break;
-            }
-            if (Object.keys(prodError).includes('purity')) {
-              Alert.alert('Attention', `Please select purity for product ${i + 1}`);
-              break;
-            }
-            if (Object.keys(prodError).includes('piece')) {
-              Alert.alert('Attention', `Please enter the piece count for product ${i + 1}`);
-              break;
-            }
-            if (Object.keys(prodError).includes('grossWeightInGrams')) {
-              Alert.alert('Attention', `Please enter the gross weight for product ${i + 1}`);
-              break;
-            }
-            if (Object.keys(prodError).includes('netWeightInGrams')) {
-              Alert.alert('Attention', `Please enter the net weight for product ${i + 1}`);
-              break;
-            }
-            if (Object.keys(prodError).includes('ratePerGram')) {
-              Alert.alert('Attention', `Rate per gram information missing for product ${i + 1}`);
               break;
             }
           }
@@ -735,79 +805,53 @@ const CreateInvoiceScreen = ({ navigation }) => {
       return;
     }
 
-    // Start payment loading
     setIsPaymentLoading(true);
 
-    // Create a copy of customer details for processing
+    // Process customer names with defaults
     const processedCustomerDetails = { ...customerDetails };
-
-    // Auto-fill customer names with "Cash" if both are empty during navigation
-    if (!processedCustomerDetails.customerNameEng.trim() && !processedCustomerDetails.customerNameHin.trim()) {
+    if (!processedCustomerDetails.customerNameEng.trim()) {
       processedCustomerDetails.customerNameEng = 'Cash';
-      processedCustomerDetails.customerNameHin = 'Cash';
+    }
+    if (!processedCustomerDetails.customerNameHin.trim()) {
+      processedCustomerDetails.customerNameHin = 'नगदी ग्राहक';
     }
 
-    // Format and log the data before navigation with processed customer details
-    const formattedData = {
-      invoiceDetails: {
-        billNo: invoiceDetails.billNo,
-        date: new Date(invoiceDetails.date).toISOString(),
-        remarks: invoiceDetails.remarks || "Invoice created from mobile app"
-      },
-      customerDetails: {
-        customerNameEng: processedCustomerDetails.customerNameEng.trim() || 'Cash',
-        customerNameHin: processedCustomerDetails.customerNameHin.trim() || 'Cash',
-        address: processedCustomerDetails.address || '', // UPDATED: Address is completely optional
-        mobileNumber: processedCustomerDetails.mobileNumber || ''
-      },
-      productDetails: products.map(product => ({
-        type: product.type,
-        tagNo: product.tagNo || '',
-        productName: product.productName,
-        remark: product.remark || '',
-        purity: product.purity ? product.purity.toString() : '',
-        piece: parseInt(product.piece) || 0,
-        grossWeightInGrams: parseFloat(product.grossWeightInGrams) || 0,
-        netWeightInGrams: parseFloat(product.netWeightInGrams) || 0,
-        lessWeightInGrams: parseFloat(product.lessWeightInGrams) || 0,
-        stoneRate: parseInt(product.stoneRate) || 0,
-        labourChargesInPercentage: parseFloat(product.labourChargesInPercentage) || 0,
-        labourChargesInGram: parseFloat(product.labourChargesInGram) || 0,
-        ratePerGram: parseInt(product.ratePerGram) || 0,
-        additionalAmount: parseInt(product.additionalAmount) || 0,
-        discountAmount: parseInt(product.discountAmount) || 0
-      }))
-    };
+    const formattedData = formatInvoiceData();
 
-    console.log('Invoice Data to be stored:', JSON.stringify(formattedData, null, 2));
-        
     const filteredProducts = products.filter(p => hasCompleteProduct(p));
 
-    // Wait for 3 seconds then navigate
-    setTimeout(() => {
-      setIsPaymentLoading(false);
-      navigation.navigate('invoice-payment', {
-        invoiceDetails,
-        customerDetails: processedCustomerDetails, // Use processed customer details
-        productDetails: filteredProducts,
-        formattedInvoiceData: formattedData
-      });
-    }, 3000);
+    // Log all stored data
+    console.log('=== ALL STORED INVOICE DATA ===');
+    console.log('Invoice Details:', invoiceDetails);
+    console.log('Customer Details:', processedCustomerDetails);
+    console.log('All Products (including incomplete):', products);
+    console.log('Filtered Products (complete only):', filteredProducts);
+    console.log('Formatted Data for API:', formattedData);
+    console.log('=== END STORED DATA ===');
+
+    // Remove the timeout and navigate immediately
+    setIsPaymentLoading(false);
+    navigation.navigate('invoice-payment', {
+      invoiceDetails,
+      customerDetails: processedCustomerDetails,
+      productDetails: filteredProducts,
+      formattedInvoiceData: formattedData
+    });
   };
 
+  // UPDATED: handleAddProduct with proper scrolling and focus
   const handleAddProduct = () => {
-    // Auto-hide customer details when adding first product
     if (expanded) {
       setExpanded(false);
     }
-    
+
     setProductForm(true);
     setShowData(true);
     const newProduct = {
-      type: '',
+      type: 'Sales', // Set default type to Sales
       tagNo: '',
       productName: '',
-      remark: '', // Initialize as empty string - completely optional
+      remark: '',
       purity: '',
       piece: '',
       grossWeightInGrams: '',
@@ -818,39 +862,49 @@ const CreateInvoiceScreen = ({ navigation }) => {
       value: '',
       labourChargesInPercentage: '',
       labourChargesInGram: '',
-      labourChargeInRupees: '',
+      labourChargesInRs: '', // FIXED: Changed to labourChargesInRs
       finalAmount: '',
       additionalAmount: '',
       discountAmount: '',
+      labourType: '',
     };
     const updatedProducts = [...products, newProduct];
     setProducts(updatedProducts);
-    setProductDetails(updatedProducts);
-    setInputClearType(true);
+    setInputClearType(false); // Keep default as Sales
     setInputClearPurity(true);
     setInputClearLabourType(true);
+    setValueType('Sales'); // Set default
     setLabourType('');
+
+    // Auto-close other products
+    setExpandedProductIndices([]);
+
+    const newIndex = updatedProducts.length - 1;
+
+    // Scroll to the new product after a short delay
+    setTimeout(() => {
+      scrollToInput(`product_${newIndex}_tagNo`);
+    }, 100);
+
+    // Focus on tag number field
+    setTimeout(() => {
+      focusOnProductField(newIndex, 'tagNo');
+    }, 300);
   };
 
-  // CORRECTED getRate function with better loading and error handling
   const getRate = (key) => {
-    console.log(`🔍 Getting rate for ${key}:`, liveGoldRate?.data?.[key]);
-    
     if (goldRateLoading) {
       return 'Loading...';
     }
-    
+
     if (liveGoldRate && liveGoldRate.data && liveGoldRate.data[key]) {
       const rate = Math.floor(liveGoldRate.data[key]);
-      console.log(`✅ Rate for ${key}: ₹${rate}`);
       return `₹${rate}`;
     }
-    
-    console.log(`⚠️ No rate found for ${key}, showing 'N/A'`);
+
     return 'N/A';
   };
 
-  // Input style helper to show red border on error
   const inputStyleWithError = (hasError) => [
     styles.input,
     hasError && { borderColor: 'red', borderWidth: 2 },
@@ -859,798 +913,943 @@ const CreateInvoiceScreen = ({ navigation }) => {
   const totals = calculateTotals();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
-      <View style={styles.statusBarBackground} />
-      <View style={styles.header} />
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      <SafeAreaView style={styles.container}>
+        <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+        <View style={styles.statusBarBackground} />
+        <View style={styles.header} />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButtonTouch}>
-            <Image source={require('../../assets/backarrow.png')} style={styles.backarrow} />
-            <Text style={styles.backText}>Back</Text>
-          </TouchableOpacity>
+        <TouchableWithoutFeedback onPress={handleTapOutside}>
+          <ScrollView 
+            ref={scrollViewRef}
+            contentContainerStyle={styles.scrollContent} 
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.headerRow}>
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButtonTouch}>
+                <Image source={require('../../assets/backarrow.png')} style={styles.backarrow} />
+                <Text style={styles.backText}>Back</Text>
+              </TouchableOpacity>
 
-          <Text style={styles.heading}>Today's Gold Rate</Text>
+              <Text style={styles.heading}>Today's Gold Rate</Text>
 
-          <View style={styles.placeholderView} />
-        </View>
+              <View style={styles.placeholderView} />
+            </View>
 
-        <View style={styles.boxRow}>
-          <View style={styles.box}>
-            <Text style={styles.boxTitle}>18k</Text>
-            <Text style={styles.boxValue}>{getRate('price18k')}</Text>
-          </View>
-          <View style={styles.box}>
-            <Text style={styles.boxTitle}>20k</Text>
-            <Text style={styles.boxValue}>{getRate('price20k')}</Text>
-          </View>
-          <View style={styles.box}>
-            <Text style={styles.boxTitle}>22k</Text>
-            <Text style={styles.boxValue}>{getRate('price22k')}</Text>
-          </View>
-          <View style={styles.box}>
-            <Text style={styles.boxTitle}>24k</Text>
-            <Text style={styles.boxValue}>{getRate('price24k')}</Text>
-          </View>
-        </View>
-
-        <Text style={styles.infoText}>
-          Please fill in all the required details here and generate the invoice
-        </Text>
-
-        {/* Invoice details */}
-        <View style={styles.sectionFirst}>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Bill No.</Text>
-            <TextInput
-              style={inputStyleWithError(errorsInvoice.billNo)}
-              placeholder="RJ-001"
-              placeholderTextColor="#777"
-              value={invoiceDetails.billNo}
-              onChangeText={value => handleInvoiceDetailsChange('billNo', value)}
-            />
-          </View>
-          <View style={styles.inputContainerHalf}>
-            <Text style={styles.label}>Date</Text>
-            <TextInput
-              style={inputStyleWithError(errorsInvoice.date)}
-              value={moment().format('DD/MM/YYYY')}
-              placeholder="DD/MM/YYYY"
-              placeholderTextColor="#777"
-              editable={false}
-            />
-            <TouchableOpacity style={styles.dateContainer}>
-              <Image source={require('../../assets/dateicon.png')} style={styles.datePickerBtn} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Customer Details */}
-        <TouchableOpacity style={styles.headerRow1} onPress={toggleDropdownCustom}>
-          <Text style={styles.sectionTitle}>Customer Details</Text>
-          <Image source={require('../../assets/dropdownicon.png')} style={styles.dropdownIcon} />
-        </TouchableOpacity>
-        {expanded && (
-          <>
-            <View style={styles.row}>
-              <View style={styles.inputContainer}>
-                {/* UPDATED: Customer name in English is now optional */}
-                <Text style={styles.label}>Name (In Eng)</Text>
-                <TextInput
-                  style={inputStyleWithError(errorsCustomer.customerNameEng)}
-                  placeholder="Enter Name"
-                  placeholderTextColor="#777"
-                  value={customerDetails.customerNameEng}
-                  onChangeText={text => handleCustomerDetailsChange('customerNameEng', text)}
-                />
+            <View style={styles.boxRow}>
+              <View style={styles.box}>
+                <Text style={styles.boxTitle}>18k</Text>
+                <Text style={styles.boxValue}>{getRate('price18k')}</Text>
               </View>
-              <View style={[styles.inputContainer, { marginLeft: 10 }]}>
-                {/* UPDATED: Customer name in Hindi is now optional */}
-                <Text style={styles.label}>Name (In Hindi)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="हिन्दी नाम"
-                  placeholderTextColor="#777"
-                  value={customerDetails.customerNameHin}
-                  onChangeText={text => handleCustomerDetailsChange('customerNameHin', text)}
-                />
+              <View style={styles.box}>
+                <Text style={styles.boxTitle}>20k</Text>
+                <Text style={styles.boxValue}>{getRate('price20k')}</Text>
+              </View>
+              <View style={styles.box}>
+                <Text style={styles.boxTitle}>22k</Text>
+                <Text style={styles.boxValue}>{getRate('price22k')}</Text>
+              </View>
+              <View style={styles.box}>
+                <Text style={styles.boxTitle}>24k</Text>
+                <Text style={styles.boxValue}>{getRate('price24k')}</Text>
               </View>
             </View>
-            <View>
-              <Text style={styles.label}>Mobile number</Text>
-              <TextInput
-                style={inputStyleWithError(errorsCustomer.mobileNumber)}
-                keyboardType="phone-pad"
-                placeholder="+91 0000000000"
-                placeholderTextColor="#777"
-                value={customerDetails.mobileNumber}
-                onChangeText={text => handleCustomerDetailsChange('mobileNumber', text)}
-                maxLength={10}
-              />
-            </View>
-            <View>
-              {/* UPDATED: Address is now completely optional - removed required asterisk and updated label and placeholder */}
-              <Text style={styles.label}>Address</Text>
-              <TextInput
-                style={inputStyleWithError(errorsCustomer.address)}
-                placeholder="Enter address"
-                placeholderTextColor="#777"
-                value={customerDetails.address}
-                onChangeText={text => handleCustomerDetailsChange('address', text)}
-              />
-            </View>
-            <View style={styles.divider} />
-          </>
-        )}
 
-        {/* Product Details Section */}
-        {showData &&
-          productDetails.map((item, index) => {
-            const isExpanded = expandedProductIndices.includes(index);
-            const hasData = hasCompleteProduct(item);
-            if (!hasData) return null;
-            const productErr = errorsProduct[index] || {};
+            <Text style={styles.infoText}>
+             Create New Invoice
+            </Text>
 
-            return (
-              <View style={styles.section} key={index}>
-                <TouchableOpacity
-                  style={styles.productHeader}
-                  onPress={() => toggleProductExpansion(index)}
-                >
-                  <Text style={styles.sectionTitle}>Product {index + 1}</Text>
-                  <Image
-                    source={require('../../assets/dropdownicon.png')}
-                    style={[
-                      styles.dropdownIcon,
-                      { transform: [{ rotate: isExpanded ? '180deg' : '0deg' }] },
-                    ]}
-                  />
+            {/* Invoice details */}
+            <View style={styles.sectionFirst}>
+              <View style={styles.inputContainerHalf}>
+                <Text style={styles.label}>Bill No.</Text>
+                <TextInput
+                  ref={ref => inputRefs.current['billNo'] = ref}
+                  style={inputStyleWithError(errorsInvoice.billNo)}
+                  placeholder="RJ-001"
+                  placeholderTextColor="#777"
+                  value={invoiceDetails.billNo}
+                  onChangeText={value => handleInvoiceDetailsChange('billNo', value)}
+                  onFocus={() => handleInputFocus('billNo')}
+                  editable={true}
+                />
+              </View>
+              <View style={styles.inputContainerHalf}>
+                <Text style={styles.label}>Date</Text>
+                <TextInput
+                  style={inputStyleWithError(errorsInvoice.date)}
+                  value={moment().format('DD/MM/YYYY')}
+                  placeholder="DD/MM/YYYY"
+                  placeholderTextColor="#777"
+                  editable={false}
+                />
+                <TouchableOpacity style={styles.dateContainer}>
+                  <Image source={require('../../assets/dateicon.png')} style={styles.datePickerBtn} />
                 </TouchableOpacity>
-                
-                {!isExpanded && (
-                  <View style={styles.productBox}>
-                    {item.type ? <Text style={styles.topLeft}>Type: {item.type}</Text> : null}
-                    {item.productName ? <Text style={styles.topRight}>Name: {item.productName}</Text> : null}
-                    {item.purity ? (
-                      <Text style={styles.bottomLeft}>
-                        Purity: {item.purity === 'Silver' ? 'Silver' : `${item.purity}k`}
-                      </Text>
-                    ) : null}
-                    {item.finalAmount ? <Text style={styles.bottomRight}>Amount: ₹{item.finalAmount}</Text> : null}
+              </View>
+            </View>
+
+            {/* Customer Details */}
+            <TouchableOpacity style={styles.headerRow1} onPress={toggleDropdownCustom}>
+              <Text style={styles.sectionTitle}>Customer Details</Text>
+              <Image 
+                source={require('../../assets/dropdownicon.png')} 
+                style={[styles.dropdownIcon, { transform: [{ rotate: expanded ? '0deg' : '180deg' }] }]} 
+              />
+            </TouchableOpacity>
+            {expanded && (
+              <>
+                <View style={styles.row}>
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Name (In Eng)</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current['customerNameEng'] = ref}
+                      style={inputStyleWithError(errorsCustomer.customerNameEng)}
+                      value={customerDetails.customerNameEng}
+                      onChangeText={text => handleCustomerDetailsChange('customerNameEng', text)}
+                      autoCapitalize="words"
+                      onFocus={() => handleInputFocus('customerNameEng')}
+                      editable={true}
+                    />
                   </View>
-                )}
-                
-                {isExpanded && (
-                  <>
-                    <TouchableOpacity style={styles.crossIcon} onPress={() => removeProduct(index)}>
-                      <Image source={require('../../assets/crosscircle.png')} style={styles.crossImage} />
-                    </TouchableOpacity>
-                    
-                    {/* Show all product details when expanded */}
-                    <View style={styles.expandedProductContent}>
-                      <View style={styles.row}>
-                        <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Type <Text style={styles.red}>*</Text></Text>
-                          <TextInput
-                            style={styles.input}
-                            value={item.type}
-                            editable={false}
-                            placeholder="Type"
-                            placeholderTextColor="#777"
-                          />
-                        </View>
-                        <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Tag number</Text>
-                          <TextInput
-                            style={styles.input}
-                            value={item.tagNo}
-                            onChangeText={value => handleChange(index, 'tagNo', value)}
-                            placeholder="ABC123"
-                            placeholderTextColor="#777"
-                          />
-                        </View>
-                      </View>
+                  <View style={[styles.inputContainer, { marginLeft: 10 }]}>
+                    <Text style={styles.label}>Name (In Hindi)</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current['customerNameHin'] = ref}
+                      style={styles.input}
+                      value={customerDetails.customerNameHin}
+                      onChangeText={text => handleCustomerDetailsChange('customerNameHin', text)}
+                      onFocus={() => handleInputFocus('customerNameHin')}
+                      editable={true}
+                    />
+                  </View>
+                </View>
+                <View>
+                  <Text style={styles.label}>Mobile number</Text>
+                  <TextInput
+                    ref={ref => inputRefs.current['mobileNumber'] = ref}
+                    style={inputStyleWithError(errorsCustomer.mobileNumber)}
+                    keyboardType="phone-pad"
+                    value={customerDetails.mobileNumber}
+                    onChangeText={text => handleCustomerDetailsChange('mobileNumber', text)}
+                    maxLength={10}
+                    onFocus={() => handleInputFocus('mobileNumber')}
+                    editable={true}
+                  />
+                </View>
+                <View>
+                  <Text style={styles.label}>Address</Text>
+                  <TextInput
+                    ref={ref => inputRefs.current['address'] = ref}
+                    style={inputStyleWithError(errorsCustomer.address)}
+                    value={customerDetails.address}
+                    onChangeText={text => handleCustomerDetailsChange('address', text)}
+                    autoCapitalize="sentences"
+                    onFocus={() => handleInputFocus('address')}
+                    editable={true}
+                  />
+                </View>
+                <View style={styles.divider} />
+              </>
+            )}
 
-                      <View style={styles.inputContainer}>
-                        <Text style={styles.label}>Product name <Text style={styles.red}>*</Text></Text>
-                        <TextInput
-                          style={styles.input}
-                          value={item.productName}
-                          onChangeText={value => handleChange(index, 'productName', value)}
-                          placeholder="Product name"
-                          placeholderTextColor="#777"
-                        />
-                      </View>
+            {/* Product Details Section - Show all products (including incomplete ones) */}
+            {showData && products.map((item, index) => {
+              // Show all products, not just complete ones, but skip current product being added
+              if (index === products.length - 1 && productForm) return null;
+              
+              const isExpanded = expandedProductIndices.includes(index);
+              const hasData = hasAnyProductData(item); // Changed to check any data instead of complete
+              
+              // Show product even if empty (but with some indication)
+              const productErr = errorsProduct[index] || {};
 
-                      <View style={styles.inputContainer}>
-                        {/* UPDATED: Remark is now optional - removed required asterisk */}
-                        <Text style={styles.label}>Remark (Optional)</Text>
-                        <TextInput
-                          style={styles.input}
-                          value={item.remark || ''}
-                          onChangeText={value => handleChange(index, 'remark', value)}
-                          placeholder="Optional remark"
-                          placeholderTextColor="#777"
-                        />
-                      </View>
+              return (
+                <View style={styles.section} key={index}>
+                  <TouchableOpacity
+                    style={styles.productHeader}
+                    onPress={() => toggleProductExpansion(index)}
+                  >
+                    <Text style={styles.sectionTitle}>
+                      Product {index + 1} {!hasData && <Text style={styles.emptyIndicator}>(Empty)</Text>}
+                    </Text>
+                    <Image
+                      source={require('../../assets/dropdownicon.png')}
+                      style={[
+                        styles.dropdownIcon,
+                        { transform: [{ rotate: isExpanded ? '180deg' : '0deg' }] },
+                      ]}
+                    />
+                  </TouchableOpacity>
 
-                      <View style={styles.row}>
+                  {!isExpanded && hasData && (
+                    <View style={styles.productBox}>
+                      {item.type ? <Text style={styles.topLeft}>Type: {item.type}</Text> : null}
+                      {item.productName ? <Text style={styles.topRight}>Name: {item.productName}</Text> : null}
+                      {item.purity ? (
+                        <Text style={styles.bottomLeft}>
+                          Purity: {item.purity === 'Silver' ? 'Silver' : `${item.purity}k`}
+                        </Text>
+                      ) : null}
+                      {item.finalAmount ? <Text style={styles.bottomRight}>Amount: ₹{item.finalAmount}</Text> : null}
+                    </View>
+                  )}
+
+                  {!isExpanded && !hasData && (
+                    <View style={styles.emptyProductBox}>
+                      <Text style={styles.emptyProductText}>No data entered for this product</Text>
+                    </View>
+                  )}
+
+                  {isExpanded && (
+                    <>
+                      <TouchableOpacity style={styles.crossIcon} onPress={() => removeProduct(index)}>
+                        <Image source={require('../../assets/crosscircle.png')} style={styles.crossImage} />
+                      </TouchableOpacity>
+
+                      <View style={styles.expandedProductContent}>
+                        <View style={styles.row}>
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>
+                              Type <Text style={styles.red}>*</Text>
+                            </Text>
+                            <View>
+                              <TouchableOpacity onPress={() => setTypeDrop(!typeDrop)}>
+                                <Image source={require('../../assets/down.png')} style={styles.dropdownArrow} />
+                                <View style={inputStyleWithError(productErr.type)}>
+                                  <Text style={styles.dropdownText}>{item.type || 'Select type'}</Text>
+                                </View>
+                              </TouchableOpacity>
+                              {typeDrop && (
+                                <View style={styles.dropdownContainer}>
+                                  {['Sales', 'Purchase'].map((type, i) => (
+                                    <TouchableOpacity key={i} onPress={() => toggleDropdownType(type, index)}>
+                                      <Text style={styles.dropdownOption}>{type}</Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Tag number</Text>
+                            <TextInput
+                              ref={ref => inputRefs.current[`product_${index}_tagNo`] = ref}
+                              style={styles.input}
+                              value={item.tagNo}
+                              onChangeText={value => handleChange(index, 'tagNo', value)}
+                              autoCapitalize="characters"
+                              onFocus={() => handleInputFocus(`product_${index}_tagNo`)}
+                              editable={true}
+                            />
+                          </View>
+                        </View>
+
                         <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Purity <Text style={styles.red}>*</Text></Text>
+                          <Text style={styles.label}>
+                            Product name <Text style={styles.red}>*</Text>
+                          </Text>
                           <TextInput
+                            ref={ref => inputRefs.current[`product_${index}_productName`] = ref}
+                            style={inputStyleWithError(productErr.productName)}
+                            value={item.productName}
+                            onChangeText={value => handleProductNameInput(value, index)}
+                            autoCapitalize="characters"
+                            onFocus={() => handleInputFocus(`product_${index}_productName`)}
+                            editable={true}
+                          />
+                          {showSuggestions && suggestionIndex === index && productNameSuggestions.length > 0 && (
+                            <View style={styles.suggestionsContainer}>
+                              {productNameSuggestions.map((suggestion, i) => (
+                                <TouchableOpacity 
+                                  key={i} 
+                                  style={styles.suggestionItem}
+                                  onPress={() => selectProductSuggestion(suggestion, index)}
+                                >
+                                  <Text style={styles.suggestionText}>{suggestion}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          )}
+                        </View>
+
+                        <View style={styles.inputContainer}>
+                          <Text style={styles.label}>Remark (Optional)</Text>
+                          <TextInput
+                            ref={ref => inputRefs.current[`product_${index}_remark`] = ref}
                             style={styles.input}
-                            value={item.purity === 'Silver' ? 'Silver' : (item.purity ? `${item.purity}k` : '')}
-                            editable={false}
-                            placeholder="Purity"
-                            placeholderTextColor="#777"
+                            value={item.remark || ''}
+                            onChangeText={value => handleChange(index, 'remark', value)}
+                            autoCapitalize="characters"
+                            onFocus={() => handleInputFocus(`product_${index}_remark`)}
+                            editable={true}
                           />
                         </View>
-                        <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Piece <Text style={styles.red}>*</Text></Text>
-                          <TextInput
-                            style={styles.input}
-                            value={item.piece}
-                            onChangeText={value => handleChange(index, 'piece', value)}
-                            placeholder="1"
-                            keyboardType="numeric"
-                            placeholderTextColor="#777"
-                          />
-                        </View>
-                      </View>
 
-                      <View style={styles.row}>
-                        <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Gross Wt. (In Gm) <Text style={styles.red}>*</Text></Text>
-                          <TextInput
-                            style={styles.input}
-                            value={item.grossWeightInGrams}
-                            onChangeText={value => handleChange(index, 'grossWeightInGrams', value)}
-                            placeholder="0.00"
-                            keyboardType="decimal-pad"
-                            placeholderTextColor="#777"
-                          />
+                        <View style={styles.row}>
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Purity</Text>
+                            <View>
+                              <TouchableOpacity onPress={() => setPurityDrop(!purityDrop)}>
+                                <Image source={require('../../assets/down.png')} style={styles.dropdownArrow} />
+                                <View style={inputStyleWithError(productErr.purity)}>
+                                  <Text style={styles.dropdownText}>
+                                    {item.purity === 'Silver' ? 'Silver' : (item.purity ? `${item.purity}k` : 'Select purity')}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                              {purityDrop && (
+                                <View style={styles.dropdownContainer}>
+                                  {['18k', '20k', '22k', '24k', 'Silver'].map((purity, i) => (
+                                    <TouchableOpacity key={i} onPress={() => toggleDropdownPurity(purity, index)}>
+                                      <Text style={styles.dropdownOption}>{purity}</Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Piece</Text>
+                            <TextInput
+                              ref={ref => inputRefs.current[`product_${index}_piece`] = ref}
+                              style={styles.input}
+                              value={item.piece}
+                              onChangeText={value => handleChange(index, 'piece', value)}
+                              keyboardType="numeric"
+                              onFocus={() => handleInputFocus(`product_${index}_piece`)}
+                              editable={true}
+                            />
+                          </View>
                         </View>
+
+                        {/* MODIFIED: Field positions swapped and labels changed */}
+                        <View style={styles.row}>
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Gross Wt. (In Gm)</Text>
+                            <TextInput
+                              ref={ref => inputRefs.current[`product_${index}_grossWeight`] = ref}
+                              style={styles.input}
+                              value={item.grossWeightInGrams}
+                              onChangeText={value => handleChange(index, 'grossWeightInGrams', value)}
+                              keyboardType="decimal-pad"
+                              onFocus={() => handleInputFocus(`product_${index}_grossWeight`)}
+                              editable={true}
+                            />
+                          </View>
+
+                          {/* SWAPPED: Less Wt field shown in Net Wt position */}
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Less Wt. (In Gm)</Text>
+                            <TextInput
+                              ref={ref => inputRefs.current[`product_${index}_lessWeight`] = ref}
+                              style={styles.input}
+                              value={item.lessWeightInGrams}
+                              onChangeText={value => handleChange(index, 'lessWeightInGrams', value)}
+                              keyboardType="decimal-pad"
+                              onFocus={() => handleInputFocus(`product_${index}_lessWeight`)}
+                              editable={true}
+                            />
+                          </View>
+                        </View>
+
+                        {/* SWAPPED: Net Wt field shown in Less Wt position - NOW EDITABLE */}
                         <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Net Wt. (In Gm) <Text style={styles.red}>*</Text></Text>
+                          <Text style={styles.label}>Net Wt. (In Gm)</Text>
                           <TextInput
+                            ref={ref => inputRefs.current[`product_${index}_netWeight`] = ref}
                             style={styles.input}
                             value={item.netWeightInGrams}
                             onChangeText={value => handleChange(index, 'netWeightInGrams', value)}
-                            placeholder="0.00"
                             keyboardType="decimal-pad"
-                            placeholderTextColor="#777"
+                            onFocus={() => handleInputFocus(`product_${index}_netWeight`)}
+                            editable={true}
                           />
                         </View>
-                      </View>
 
-                      <View style={styles.inputContainer}>
-                        <Text style={styles.label}>Less Wt. (In Gm)</Text>
-                        <TextInput
-                          style={styles.input}
-                          value={item.lessWeightInGrams}
-                          onChangeText={value => handleChange(index, 'lessWeightInGrams', value)}
-                          placeholder="0.00"
-                          keyboardType="decimal-pad"
-                          placeholderTextColor="#777"
-                        />
-                      </View>
-
-                      <View style={styles.inputContainer}>
-                        <Text style={styles.label}>
-                          Rate (per Gm)
-                        </Text>
-                        <TextInput
-                          style={styles.input}
-                          value={item.ratePerGram}
-                          onChangeText={value => handleChange(index, 'ratePerGram', value)}
-                          placeholder="0"
-                          keyboardType="numeric"
-                          placeholderTextColor="#777"
-                        />
-                      </View>
-
-                      <View style={styles.inputContainer}>
-                        <Text style={styles.label}>Value (Net Wt. * Rate)</Text>
-                        <TextInput
-                          style={styles.input}
-                          value={item.value || '0'}
-                          editable={false}
-                          placeholder="0"
-                          placeholderTextColor="#777"
-                        />
-                      </View>
-
-                      <View style={styles.row}>
+                        {/* UPDATED: Rate per gram now accepts decimal values */}
                         <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Stone rate</Text>
+                          <Text style={styles.label}>Rate (per Gm)</Text>
                           <TextInput
-                            style={styles.input}
-                            value={item.stoneRate}
-                            onChangeText={value => handleChange(index, 'stoneRate', value)}
-                            placeholder="0"
-                            keyboardType="numeric"
-                            placeholderTextColor="#777"
-                          />
-                        </View>
-                        <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Labour charge type</Text>
-                          <TextInput
-                            style={styles.input}
-                            value={item.labourChargesInPercentage ? 'Percentage' : item.labourChargesInGram ? 'Per Gram' : 'Not Set'}
-                            editable={false}
-                            placeholder="Type"
-                            placeholderTextColor="#777"
-                          />
-                        </View>
-                      </View>
-
-                      {item.labourChargesInPercentage && (
-                        <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Labour charge (%)</Text>
-                          <TextInput
-                            style={styles.input}
-                            value={item.labourChargesInPercentage}
-                            onChangeText={value => handleChange(index, 'labourChargesInPercentage', value)}
-                            placeholder="0.00"
+                            ref={ref => inputRefs.current[`product_${index}_rate`] = ref}
+                            style={inputStyleWithError(productErr.ratePerGram)}
+                            value={item.ratePerGram}
+                            onChangeText={value => handleChange(index, 'ratePerGram', value)}
                             keyboardType="decimal-pad"
-                            placeholderTextColor="#777"
+                            onFocus={() => handleInputFocus(`product_${index}_rate`)}
+                            editable={true}
                           />
                         </View>
-                      )}
 
-                      {item.labourChargesInGram && (
                         <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Labour charge (In Gm)</Text>
+                          <Text style={styles.label}>Value (Net Wt. * Rate)</Text>
                           <TextInput
+                            ref={ref => inputRefs.current[`product_${index}_value`] = ref}
                             style={styles.input}
-                            value={item.labourChargesInGram}
-                            onChangeText={value => handleChange(index, 'labourChargesInGram', value)}
-                            placeholder="0.00"
+                            value={item.value || '0'}
+                            onChangeText={value => handleChange(index, 'value', value)}
+                            keyboardType="numeric"
+                            onFocus={() => handleInputFocus(`product_${index}_value`)}
+                            editable={true}
+                          />
+                        </View>
+
+                        <View style={styles.row}>
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Stone rate</Text>
+                            <TextInput
+                              ref={ref => inputRefs.current[`product_${index}_stoneRate`] = ref}
+                              style={styles.input}
+                              value={item.stoneRate}
+                              onChangeText={value => handleChange(index, 'stoneRate', value)}
+                              keyboardType="numeric"
+                              onFocus={() => handleInputFocus(`product_${index}_stoneRate`)}
+                              editable={true}
+                            />
+                          </View>
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Labour charge type</Text>
+                            <View>
+                              <TouchableOpacity onPress={() => setLabourTypeDrop(!labourTypeDrop)}>
+                                <Image source={require('../../assets/down.png')} style={styles.dropdownArrow} />
+                                <View style={styles.input}>
+                                  <Text style={styles.dropdownText}>
+                                    {item.labourType === 'percentage' ? 'Percentage' : 
+                                    item.labourType === 'gram' ? 'Per Gram' : 'Select type'}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                              {labourTypeDrop && (
+                                <View style={styles.dropdownContainer}>
+                                  <TouchableOpacity onPress={() => toggleDropdownLabourType('percentage', index)}>
+                                    <Text style={styles.dropdownOption}>Percentage</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity onPress={() => toggleDropdownLabourType('gram', index)}>
+                                    <Text style={styles.dropdownOption}>Per Gram</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </View>
+
+                        {item.labourType === 'percentage' && (
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Labour charge (%)</Text>
+                            <TextInput
+                              ref={ref => inputRefs.current[`product_${index}_labourPercentage`] = ref}
+                              style={styles.input}
+                              value={item.labourChargesInPercentage}
+                              onChangeText={value => handleChange(index, 'labourChargesInPercentage', value)}
+                              keyboardType="decimal-pad"
+                              onFocus={() => handleInputFocus(`product_${index}_labourPercentage`)}
+                              editable={true}
+                            />
+                          </View>
+                        )}
+
+                        {/* UPDATED: Labour charge per gram now accepts decimal values */}
+                        {item.labourType === 'gram' && (
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Labour charge (In Gm)</Text>
+                            <TextInput
+                              ref={ref => inputRefs.current[`product_${index}_labourGram`] = ref}
+                              style={styles.input}
+                              value={item.labourChargesInGram}
+                              onChangeText={value => handleChange(index, 'labourChargesInGram', value)}
+                              keyboardType="decimal-pad"
+                              onFocus={() => handleInputFocus(`product_${index}_labourGram`)}
+                              editable={true}
+                            />
+                          </View>
+                        )}
+
+                        {/* FIXED: Labour charge in rupees now uses labourChargesInRs */}
+                        <View style={styles.inputContainer}>
+                          <Text style={styles.label}>Labour charge (In ₹)</Text>
+                          <TextInput
+                            ref={ref => inputRefs.current[`product_${index}_labourRupees`] = ref}
+                            style={styles.input}
+                            value={item.labourChargesInRs || ''} // FIXED: Changed to labourChargesInRs
+                            onChangeText={value => handleChange(index, 'labourChargesInRs', value)}
                             keyboardType="decimal-pad"
-                            placeholderTextColor="#777"
+                            onFocus={() => handleInputFocus(`product_${index}_labourRupees`)}
+                            editable={true}
                           />
                         </View>
-                      )}
 
-                      <View style={styles.inputContainer}>
-                        <Text style={styles.label}>Labour charge (In ₹)</Text>
-                        <TextInput
-                          style={styles.input}
-                          value={item.labourChargeInRupees || '0'}
-                          editable={false}
-                          placeholder="0"
-                          placeholderTextColor="#777"
-                        />
-                      </View>
+                        <View style={styles.row}>
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Addition (₹)</Text>
+                            <TextInput
+                              ref={ref => inputRefs.current[`product_${index}_addition`] = ref}
+                              style={styles.input}
+                              value={item.additionalAmount}
+                              onChangeText={value => handleChange(index, 'additionalAmount', value)}
+                              keyboardType="numeric"
+                              onFocus={() => handleInputFocus(`product_${index}_addition`)}
+                              editable={true}
+                            />
+                          </View>
 
-                      <View style={styles.row}>
+                          <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Discount (₹)</Text>
+                            <TextInput
+                              ref={ref => inputRefs.current[`product_${index}_discount`] = ref}
+                              style={styles.input}
+                              value={item.discountAmount}
+                              onChangeText={value => handleChange(index, 'discountAmount', value)}
+                              keyboardType="numeric"
+                              onFocus={() => handleInputFocus(`product_${index}_discount`)}
+                              editable={true}
+                            />
+                          </View>
+                        </View>
+
                         <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Addition (₹)</Text>
+                          <Text style={styles.label}>Final Amount</Text>
                           <TextInput
+                            ref={ref => inputRefs.current[`product_${index}_finalAmount`] = ref}
                             style={styles.input}
-                            value={item.additionalAmount}
-                            onChangeText={value => handleChange(index, 'additionalAmount', value)}
-                            placeholder="0"
+                            value={item.finalAmount || '0'}
+                            onChangeText={value => handleChange(index, 'finalAmount', value)}
                             keyboardType="numeric"
-                            placeholderTextColor="#777"
-                          />
-                        </View>
-                        <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Discount (₹)</Text>
-                          <TextInput
-                            style={styles.input}
-                            value={item.discountAmount}
-                            onChangeText={value => handleChange(index, 'discountAmount', value)}
-                            placeholder="0"
-                            keyboardType="numeric"
-                            placeholderTextColor="#777"
+                            onFocus={() => handleInputFocus(`product_${index}_finalAmount`)}
+                            editable={true}
                           />
                         </View>
                       </View>
+                    </>
+                  )}
 
-                      <View style={styles.inputContainer}>
-                        <Text style={styles.label}>Final Amount</Text>
-                        <TextInput
-                          style={styles.input}
-                          value={item.finalAmount || '0'}
-                          editable={false}
-                          placeholder="0"
-                          placeholderTextColor="#777"
-                        />
-                      </View>
-                    </View>
-                  </>
-                )}
-                
-                <View style={styles.divider} />
-              </View>
-            );
-          })}
+                  <View style={styles.divider} />
+                </View>
+              );
+            })}
 
-        {/* Add/Edit Product Form */}
-        {productForm && lastIndex >= 0 && (
-          <View>
-            {/* Discard Product Button */}
-            <View style={styles.productFormHeader}>
-              <Text style={styles.productFormTitle}>Add Product {lastIndex + 1}</Text>
-              <TouchableOpacity style={styles.discardButton} onPress={discardCurrentProduct}>
-                <Image source={require('../../assets/crosscircle.png')} style={styles.discardIcon} />
-                <Text style={styles.discardText}>Discard</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.row}>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Type <Text style={styles.red}>*</Text></Text>
-                <View>
-                  <TouchableOpacity onPress={handleTypeDropOpen}>
-                    <Image source={require('../../assets/down.png')} style={styles.dropdownArrow} />
-                    <View style={inputStyleWithError(errorsProduct[lastIndex]?.type)}>
-                      <Text style={styles.dropdownText}>{inputClearType ? 'Select type' : valueType}</Text>
-                    </View>
+            {/* Current Product Form */}
+            {productForm && lastIndex >= 0 && (
+              <View>
+                <View style={styles.productFormHeader}>
+                  <Text style={styles.productFormTitle}>Add Product {lastIndex + 1}</Text>
+                  <TouchableOpacity style={styles.discardButton} onPress={discardCurrentProduct}>
+                    <Image source={require('../../assets/crosscircle.png')} style={styles.discardIcon} />
+                    <Text style={styles.discardText}>Discard</Text>
                   </TouchableOpacity>
-                  {typeDrop && (
-                    <View style={styles.dropdownContainer}>
-                      {['Sales', 'Purchase'].map((type, i) => (
-                        <TouchableOpacity key={i} onPress={() => toggleDropdownType(type)}>
-                          <Text style={styles.dropdownOption}>{type}</Text>
+                </View>
+
+                <View style={styles.row}>
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Type <Text style={styles.red}>*</Text></Text>
+                    <View>
+                      <TouchableOpacity onPress={handleTypeDropOpen}>
+                        <Image source={require('../../assets/down.png')} style={styles.dropdownArrow} />
+                        <View style={inputStyleWithError(errorsProduct[lastIndex]?.type)}>
+                          <Text style={styles.dropdownText}>{inputClearType ? 'Select type' : valueType}</Text>
+                        </View>
+                      </TouchableOpacity>
+                      {typeDrop && (
+                        <View style={styles.dropdownContainer}>
+                          {['Sales', 'Purchase'].map((type, i) => (
+                            <TouchableOpacity key={i} onPress={() => toggleDropdownType(type)}>
+                              <Text style={styles.dropdownOption}>{type}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Tag number</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current[`product_${lastIndex}_tagNo`] = ref}
+                      style={styles.input}
+                      value={products[lastIndex].tagNo}
+                      onChangeText={value => handleChange(lastIndex, 'tagNo', value)}
+                      autoCapitalize="characters"
+                      onFocus={() => handleInputFocus(`product_${lastIndex}_tagNo`)}
+                      editable={true}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.inputContainer}>
+                  <Text style={styles.label}>Product name <Text style={styles.red}>*</Text></Text>
+                  <TextInput
+                    ref={ref => inputRefs.current[`product_${lastIndex}_productName`] = ref}
+                    style={inputStyleWithError(errorsProduct[lastIndex]?.productName)}
+                    value={products[lastIndex].productName}
+                    onChangeText={value => handleProductNameInput(value)}
+                    autoCapitalize="characters"
+                    onFocus={() => handleInputFocus(`product_${lastIndex}_productName`)}
+                    editable={true}
+                  />
+                  {showSuggestions && suggestionIndex === lastIndex && productNameSuggestions.length > 0 && (
+                    <View style={styles.suggestionsContainer}>
+                      {productNameSuggestions.map((suggestion, i) => (
+                        <TouchableOpacity 
+                          key={i} 
+                          style={styles.suggestionItem}
+                          onPress={() => selectProductSuggestion(suggestion)}
+                        >
+                          <Text style={styles.suggestionText}>{suggestion}</Text>
                         </TouchableOpacity>
                       ))}
                     </View>
                   )}
                 </View>
-              </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Tag number</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="ABC123"
-                  keyboardType="default"
-                  placeholderTextColor="#777"
-                  value={products[lastIndex].tagNo}
-                  onChangeText={value => handleChange(lastIndex, 'tagNo', value)}
-                />
-              </View>
-            </View>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Product name <Text style={styles.red}>*</Text></Text>
-              <TextInput
-                style={inputStyleWithError(errorsProduct[lastIndex]?.productName)}
-                placeholder="Product name"
-                placeholderTextColor="#777"
-                value={products[lastIndex].productName}
-                onChangeText={value => handleChange(lastIndex, 'productName', value)}
-              />
-            </View>
-
-            <View style={styles.inputContainer}>
-              {/* UPDATED: Remark is now optional - removed required asterisk and updated label */}
-              <Text style={styles.label}>Remark (Optional)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Optional remark"
-                placeholderTextColor="#777"
-                value={products[lastIndex].remark || ''}
-                onChangeText={value => handleChange(lastIndex, 'remark', value)}
-              />
-            </View>
-
-            <View style={styles.row}>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Purity <Text style={styles.red}>*</Text></Text>
-                <View>
-                  <TouchableOpacity onPress={handlePurityDropOpen}>
-                    <Image source={require('../../assets/down.png')} style={styles.dropdownArrow} />
-                    <View style={inputStyleWithError(errorsProduct[lastIndex]?.purity)}>
-                      <Text style={styles.dropdownText}>{inputClearPurity ? 'Select purity' : valuePurity}</Text>
-                    </View>
-                  </TouchableOpacity>
-                  {purityDrop && (
-                    <View style={styles.dropdownContainer}>
-                      {/* UPDATED: Added Silver to the purity options */}
-                      {['18k', '20k', '22k', '24k', 'Silver'].map((purity, i) => (
-                        <TouchableOpacity key={i} onPress={() => toggleDropdownPurity(purity)}>
-                          <Text style={styles.dropdownOption}>{purity}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
+                <View style={styles.inputContainer}>
+                  <Text style={styles.label}>Remark (Optional)</Text>
+                  <TextInput
+                    ref={ref => inputRefs.current[`product_${lastIndex}_remark`] = ref}
+                    style={styles.input}
+                    value={products[lastIndex].remark || ''}
+                    onChangeText={value => handleChange(lastIndex, 'remark', value)}
+                    autoCapitalize="characters"
+                    onFocus={() => handleInputFocus(`product_${lastIndex}_remark`)}
+                    editable={true}
+                  />
                 </View>
-              </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Piece <Text style={styles.red}>*</Text></Text>
-                <TextInput
-                  style={inputStyleWithError(errorsProduct[lastIndex]?.piece)}
-                  placeholder="1"
-                  keyboardType="numeric"
-                  placeholderTextColor="#777"
-                  value={products[lastIndex].piece}
-                  onChangeText={value => {
-                    setPiece(value);
-                    handleChange(lastIndex, 'piece', value);
-                  }}
-                />
-              </View>
-            </View>
+                <View style={styles.row}>
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Purity</Text>
+                    <View>
+                      <TouchableOpacity onPress={handlePurityDropOpen}>
+                        <Image source={require('../../assets/down.png')} style={styles.dropdownArrow} />
+                        <View style={inputStyleWithError(errorsProduct[lastIndex]?.purity)}>
+                          <Text style={styles.dropdownText}>{inputClearPurity ? 'Select purity' : valuePurity}</Text>
+                        </View>
+                      </TouchableOpacity>
+                      {purityDrop && (
+                        <View style={styles.dropdownContainer}>
+                          {['18k', '20k', '22k', '24k', 'Silver'].map((purity, i) => (
+                            <TouchableOpacity key={i} onPress={() => toggleDropdownPurity(purity)}>
+                              <Text style={styles.dropdownOption}>{purity}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  </View>
 
-            <View style={styles.row}>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Gross Wt. (In Gm) <Text style={styles.red}>*</Text></Text>
-                <TextInput
-                  style={inputStyleWithError(errorsProduct[lastIndex]?.grossWeightInGrams)}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                  placeholderTextColor="#777"
-                  value={products[lastIndex].grossWeightInGrams}
-                  onChangeText={value => handleChange(lastIndex, 'grossWeightInGrams', value)}
-                />
-              </View>
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Piece</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current[`product_${lastIndex}_piece`] = ref}
+                      style={inputStyleWithError(errorsProduct[lastIndex]?.piece)}
+                      value={products[lastIndex].piece}
+                      onChangeText={value => {
+                        setPiece(value);
+                        handleChange(lastIndex, 'piece', value);
+                      }}
+                      keyboardType="numeric"
+                      onFocus={() => handleInputFocus(`product_${lastIndex}_piece`)}
+                      editable={true}
+                    />
+                  </View>
+                </View>
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Net Wt. (In Gm) <Text style={styles.red}>*</Text></Text>
-                <TextInput
-                  style={inputStyleWithError(errorsProduct[lastIndex]?.netWeightInGrams)}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                  placeholderTextColor="#777"
-                  value={products[lastIndex].netWeightInGrams}
-                  onChangeText={value => {
-                    setNetWeight(value);
-                    const rate = parseInt(products[lastIndex].ratePerGram) || 0;
-                    let calcValue = '0';
-                    
-                    if (rate && value) {
-                      // For gold, rate is per gram
-                      calcValue = Math.floor(rate * parseFloat(value)).toString();
+                {/* MODIFIED: Field positions swapped in current product form too */}
+                <View style={styles.row}>
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Gross Wt. (In Gm)</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current[`product_${lastIndex}_grossWeight`] = ref}
+                      style={inputStyleWithError(errorsProduct[lastIndex]?.grossWeightInGrams)}
+                      value={products[lastIndex].grossWeightInGrams}
+                      onChangeText={value => handleChange(lastIndex, 'grossWeightInGrams', value)}
+                      keyboardType="decimal-pad"
+                      onFocus={() => handleInputFocus(`product_${lastIndex}_grossWeight`)}
+                      editable={true}
+                    />
+                  </View>
+
+                  {/* SWAPPED: Less Wt field shown in Net Wt position */}
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Less Wt. (In Gm)</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current[`product_${lastIndex}_lessWeight`] = ref}
+                      style={styles.input}
+                      value={products[lastIndex].lessWeightInGrams}
+                      onChangeText={value => handleChange(lastIndex, 'lessWeightInGrams', value)}
+                      keyboardType="decimal-pad"
+                      onFocus={() => handleInputFocus(`product_${lastIndex}_lessWeight`)}
+                      editable={true}
+                    />
+                  </View>
+                </View>
+
+                {/* SWAPPED: Net Wt field shown in Less Wt position - NOW EDITABLE */}
+                <View style={styles.inputContainer}>
+                  <Text style={styles.label}>Net Wt. (In Gm)</Text>
+                  <TextInput
+                    ref={ref => inputRefs.current[`product_${lastIndex}_netWeight`] = ref}
+                    style={styles.input}
+                    value={products[lastIndex].netWeightInGrams}
+                    onChangeText={value => handleChange(lastIndex, 'netWeightInGrams', value)}
+                    keyboardType="decimal-pad"
+                    onFocus={() => handleInputFocus(`product_${lastIndex}_netWeight`)}
+                    editable={true}
+                  />
+                </View>
+
+                {/* UPDATED: Rate per gram now accepts decimal values in current product form */}
+                <View style={styles.inputContainer}>
+                  <Text style={styles.label}>Rate (per Gm)</Text>
+                  <TextInput
+                    ref={ref => inputRefs.current[`product_${lastIndex}_rate`] = ref}
+                    style={inputStyleWithError(errorsProduct[lastIndex]?.ratePerGram)}
+                    value={
+                      products[lastIndex]?.ratePerGram === '' || products[lastIndex]?.ratePerGram === undefined
+                        ? ''
+                        : String(products[lastIndex].ratePerGram)
                     }
-                    
-                    setNetValue(calcValue);
-                    handleChange(lastIndex, 'netWeightInGrams', value);
-                    handleChange(lastIndex, 'value', calcValue);
-                  }}
-                />
-              </View>
-            </View>
+                    onChangeText={value => handleChange(lastIndex, 'ratePerGram', value)}
+                    keyboardType="decimal-pad"
+                    onFocus={() => handleInputFocus(`product_${lastIndex}_rate`)}
+                    editable={true}
+                  />
+                </View>
 
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Less Wt. (In Gm)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="0.00"
-                keyboardType="decimal-pad"
-                placeholderTextColor="#777"
-                value={products[lastIndex].lessWeightInGrams}
-                onChangeText={value => handleChange(lastIndex, 'lessWeightInGrams', value)}
-              />
-            </View>
+                <View style={styles.inputContainer}>
+                  <Text style={styles.label}>Value (Net Wt. * Rate)</Text>
+                  <TextInput
+                    ref={ref => inputRefs.current[`product_${lastIndex}_value`] = ref}
+                    style={styles.input}
+                    value={products[lastIndex].value || '0'}
+                    onChangeText={value => handleChange(lastIndex, 'value', value)}
+                    keyboardType="numeric"
+                    onFocus={() => handleInputFocus(`product_${lastIndex}_value`)}
+                    editable={true}
+                  />
+                </View>
 
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>
-                Rate (per Gm) <Text style={styles.red}>*</Text>
-              </Text>
-              <TextInput
-                style={inputStyleWithError(errorsProduct[lastIndex]?.ratePerGram)}
-                placeholder="0"
-                keyboardType="numeric"
-                placeholderTextColor="#777"
-                value={
-                  products[lastIndex]?.ratePerGram === '' || products[lastIndex]?.ratePerGram === undefined
-                    ? ''
-                    : String(products[lastIndex].ratePerGram)
-                }
-                onChangeText={value => handleChange(lastIndex, 'ratePerGram', value)}
-              />
-            </View>
+                <View style={styles.row}>
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Stone rate</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current[`product_${lastIndex}_stoneRate`] = ref}
+                      style={styles.input}
+                      value={products[lastIndex].stoneRate}
+                      onChangeText={value => handleChange(lastIndex, 'stoneRate', value)}
+                      keyboardType="numeric"
+                      onFocus={() => handleInputFocus(`product_${lastIndex}_stoneRate`)}
+                      editable={true}
+                    />
+                  </View>
 
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Value (Net Wt. * Rate)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="0"
-                keyboardType="numeric"
-                placeholderTextColor="#777"
-                value={products[lastIndex].value || '0'}
-                editable={false}
-              />
-            </View>
-
-            <View style={styles.row}>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Stone rate</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="0"
-                  keyboardType="numeric"
-                  placeholderTextColor="#777"
-                  value={products[lastIndex].stoneRate}
-                  onChangeText={value => handleChange(lastIndex, 'stoneRate', value)}
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Labour charge type</Text>
-                <View>
-                  <TouchableOpacity onPress={handleLabourTypeDropOpen}>
-                    <Image source={require('../../assets/down.png')} style={styles.dropdownArrow} />
-                    <View style={styles.input}>
-                      <Text style={styles.dropdownText}>
-                        {inputClearLabourType ? 'Select type' : labourType === 'percentage' ? 'Percentage' : 'Per Gram'}
-                      </Text>
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Labour charge type</Text>
+                    <View>
+                      <TouchableOpacity onPress={handleLabourTypeDropOpen}>
+                        <Image source={require('../../assets/down.png')} style={styles.dropdownArrow} />
+                        <View style={styles.input}>
+                          <Text style={styles.dropdownText}>
+                            {inputClearLabourType ? 'Select type' : labourType === 'percentage' ? 'Percentage' : 'Per Gram'}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                      {labourTypeDrop && (
+                        <View style={styles.dropdownContainer}>
+                          <TouchableOpacity onPress={() => toggleDropdownLabourType('percentage')}>
+                            <Text style={styles.dropdownOption}>Percentage</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => toggleDropdownLabourType('gram')}>
+                            <Text style={styles.dropdownOption}>Per Gram</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
-                  </TouchableOpacity>
-                  {labourTypeDrop && (
-                    <View style={styles.dropdownContainer}>
-                      <TouchableOpacity onPress={() => toggleDropdownLabourType('percentage')}>
-                        <Text style={styles.dropdownOption}>Percentage</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => toggleDropdownLabourType('gram')}>
-                        <Text style={styles.dropdownOption}>Per Gram</Text>
-                      </TouchableOpacity>
+                  </View>
+                </View>
+
+                {labourType === 'percentage' && (
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Labour charge (%)</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current[`product_${lastIndex}_labourPercentage`] = ref}
+                      style={styles.input}
+                      value={products[lastIndex].labourChargesInPercentage}
+                      onChangeText={value => handleChange(lastIndex, 'labourChargesInPercentage', value)}
+                      keyboardType="decimal-pad"
+                      onFocus={() => handleInputFocus(`product_${lastIndex}_labourPercentage`)}
+                      editable={true}
+                    />
+                  </View>
+                )}
+
+                {/* UPDATED: Labour charge per gram now accepts decimal values in current product form */}
+                {labourType === 'gram' && (
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Labour charge (In Gm)</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current[`product_${lastIndex}_labourGram`] = ref}
+                      style={styles.input}
+                      value={products[lastIndex].labourChargesInGram}
+                      onChangeText={value => handleChange(lastIndex, 'labourChargesInGram', value)}
+                      keyboardType="decimal-pad"
+                      onFocus={() => handleInputFocus(`product_${lastIndex}_labourGram`)}
+                      editable={true}
+                    />
+                  </View>
+                )}
+
+                {/* FIXED: Labour charge in rupees now uses labourChargesInRs in current product form */}
+                <View style={styles.inputContainer}>
+                  <Text style={styles.label}>Labour charge (In ₹)</Text>
+                  <TextInput
+                    ref={ref => inputRefs.current[`product_${lastIndex}_labourRupees`] = ref}
+                    style={styles.input}
+                    value={products[lastIndex].labourChargesInRs || ''} // FIXED: Changed to labourChargesInRs
+                    onChangeText={value => handleChange(lastIndex, 'labourChargesInRs', value)}
+                    keyboardType="decimal-pad"
+                    onFocus={() => handleInputFocus(`product_${lastIndex}_labourRupees`)}
+                    editable={true}
+                  />
+                </View>
+
+                <View style={styles.row}>
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Addition (₹)</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current[`product_${lastIndex}_addition`] = ref}
+                      style={styles.input}
+                      value={products[lastIndex].additionalAmount}
+                      onChangeText={value => handleChange(lastIndex, 'additionalAmount', value)}
+                      keyboardType="numeric"
+                      onFocus={() => handleInputFocus(`product_${lastIndex}_addition`)}
+                      editable={true}
+                    />
+                  </View>
+
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.label}>Discount (₹)</Text>
+                    <TextInput
+                      ref={ref => inputRefs.current[`product_${lastIndex}_discount`] = ref}
+                      style={styles.input}
+                      value={products[lastIndex].discountAmount}
+                      onChangeText={value => handleChange(lastIndex, 'discountAmount', value)}
+                      keyboardType="numeric"
+                      onFocus={() => handleInputFocus(`product_${lastIndex}_discount`)}
+                      editable={true}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.inputContainer}>
+                  <Text style={styles.label}>Final Amount</Text>
+                  <TextInput
+                    ref={ref => inputRefs.current[`product_${lastIndex}_finalAmount`] = ref}
+                    style={styles.input}
+                    value={products[lastIndex].finalAmount || '0'}
+                    onChangeText={value => handleChange(lastIndex, 'finalAmount', value)}
+                    keyboardType="numeric"
+                    onFocus={() => handleInputFocus(`product_${lastIndex}_finalAmount`)}
+                    editable={true}
+                  />
+                </View>
+
+                <View style={styles.separator} />
+              </View>
+            )}
+
+            <TouchableOpacity onPress={handleAddProduct} style={styles.addProductButton}>
+              <Text style={styles.addProductText}>+ Add more products</Text>
+            </TouchableOpacity>
+
+            {/* Updated Invoice Summary Section with correct Grand Total calculation */}
+            {products.length > 0 && (
+              <View style={styles.totalSection}>
+                <Text style={styles.totalTitle}>Invoice Summary</Text>
+                <View style={styles.totalContainer}>
+                  <Text style={styles.productListTitle}>Products:</Text>
+                  {products.map((product, index) => {
+                    const hasValidAmount = product.finalAmount && parseInt(product.finalAmount) > 0;
+                    if (!hasValidAmount) return null;
+
+                    const amount = parseInt(product.finalAmount) || 0;
+                    const amountColor = product.type === 'Purchase' ? '#d32f2f' : Colors.BTNGREEN;
+
+                    return (
+                      <View key={index} style={styles.productRow}>
+                        <Text style={styles.productName}>
+                          Product {index + 1}: {product.productName || 'Unnamed Product'} ({product.type})
+                        </Text>
+                        <Text style={[styles.productAmount, { color: amountColor }]}>
+                          {product.type === 'Purchase' ? '-' : ''}₹{amount}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                  <View style={styles.summaryDivider} />
+
+                  {/* Sales and Purchase Totals */}
+                  {parseInt(totals.totalSalesAmount) > 0 && (
+                    <View style={styles.totalRow}>
+                      <Text style={styles.totalLabel}>Total Sales:</Text>
+                      <Text style={[styles.totalValue, { color: Colors.BTNGREEN }]}>₹{totals.totalSalesAmount}</Text>
                     </View>
                   )}
-                </View>
-              </View>
-            </View>
 
-            {labourType === 'percentage' && (
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Labour charge (%)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                  placeholderTextColor="#777"
-                  value={products[lastIndex].labourChargesInPercentage}
-                  onChangeText={value => handleChange(lastIndex, 'labourChargesInPercentage', value)}
-                />
-              </View>
-            )}
+                  {parseInt(totals.totalPurchaseAmount) > 0 && (
+                    <View style={styles.totalRow}>
+                      <Text style={styles.totalLabel}>Total Purchase:</Text>
+                      <Text style={[styles.totalValue, { color: '#d32f2f' }]}>₹{totals.totalPurchaseAmount}</Text>
+                    </View>
+                  )}
 
-            {labourType === 'gram' && (
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Labour charge (In Gm)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                  placeholderTextColor="#777"
-                  value={products[lastIndex].labourChargesInGram}
-                  onChangeText={value => handleChange(lastIndex, 'labourChargesInGram', value)}
-                />
-              </View>
-            )}
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalLabel}>Total Products:</Text>
+                    <Text style={styles.totalValue}>{products.filter(p => hasCompleteProduct(p)).length}</Text>
+                  </View>
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalLabel}>Total Pieces:</Text>
+                    <Text style={styles.totalValue}>{totals.totalPieces}</Text>
+                  </View>
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalLabel}>Total Net Weight:</Text>
+                    <Text style={styles.totalValue}>{totals.totalNetWeight} gm</Text>
+                  </View>
 
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Labour charge (In ₹)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="0"
-                keyboardType="numeric"
-                placeholderTextColor="#777"
-                value={String(products[lastIndex].labourChargeInRupees || '0')}
-                editable={false}
-              />
-            </View>
-
-            <View style={styles.row}>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Addition (₹)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="0"
-                  keyboardType="numeric"
-                  placeholderTextColor="#777"
-                  value={products[lastIndex].additionalAmount}
-                  onChangeText={value => handleChange(lastIndex, 'additionalAmount', value)}
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Discount (₹)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="0"
-                  keyboardType="numeric"
-                  placeholderTextColor="#777"
-                  value={products[lastIndex].discountAmount}
-                  onChangeText={value => handleChange(lastIndex, 'discountAmount', value)}
-                />
-              </View>
-            </View>
-
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Final Amount</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="0"
-                keyboardType="numeric"
-                placeholderTextColor="#777"
-                value={products[lastIndex].finalAmount || '0'}
-                editable={false}
-              />
-            </View>
-
-            <View style={styles.separator} />
-          </View>
-        )}
-
-        {/* Add More Products Button */}
-        <TouchableOpacity onPress={handleAddProduct} style={styles.addProductButton}>
-          <Text style={styles.addProductText}>+ Add more products</Text>
-        </TouchableOpacity>
-
-        {/* Individual Product Summary and Total Section */}
-        {products.length > 0 && (
-          <View style={styles.totalSection}>
-            <Text style={styles.totalTitle}>Invoice Summary</Text>
-            <View style={styles.totalContainer}>
-              
-              {/* Individual Product Details */}
-              <Text style={styles.productListTitle}>Products:</Text>
-              {products.map((product, index) => {
-                const hasValidData = product.productName && product.finalAmount;
-                if (!hasValidData) return null;
-                
-                return (
-                  <View key={index} style={styles.productRow}>
-                    <Text style={styles.productName}>
-                      Product {index + 1}: {product.productName || 'Unnamed Product'}
-                    </Text>
-                    <Text style={styles.productAmount}>
-                      ₹{product.finalAmount || '0'}
+                  <View style={styles.finalTotalDivider} />
+                  <View style={styles.totalRow}>
+                    <Text style={styles.finalTotalLabel}>Grand Total (Sales - Purchase):</Text>
+                    <Text style={[styles.totalAmountValue, { color: parseInt(totals.grandTotal) >= 0 ? Colors.BTNGREEN : '#d32f2f' }]}>
+                      {parseInt(totals.grandTotal) < 0 ? '-' : ''}₹{Math.abs(parseInt(totals.grandTotal))}
                     </Text>
                   </View>
-                );
-              })}
-              
-              <View style={styles.summaryDivider} />
-              
-              {/* Summary Totals */}
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total Products:</Text>
-                <Text style={styles.totalValue}>{products.filter(p => hasCompleteProduct(p)).length}</Text>
+                </View>
               </View>
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total Pieces:</Text>
-                <Text style={styles.totalValue}>{totals.totalPieces}</Text>
-              </View>
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total Net Weight:</Text>
-                <Text style={styles.totalValue}>{totals.totalNetWeight} gm</Text>
-              </View>
-              
-              <View style={styles.finalTotalDivider} />
-              <View style={styles.totalRow}>
-                <Text style={styles.finalTotalLabel}>Grand Total:</Text>
-                <Text style={styles.totalAmountValue}>₹{totals.totalAmount}</Text>
-              </View>
-            </View>
-          </View>
-        )}
-      </ScrollView>
+            )}
+          </ScrollView>
+        </TouchableWithoutFeedback>
 
-      {/* Footer with loading state */}
-      <View style={styles.footer}>
-        <TouchableOpacity 
-          style={[styles.payButton, isPaymentLoading && styles.payButtonDisabled]} 
-          onPress={navigateToPayment}
-          disabled={isPaymentLoading}
-        >
-          {isPaymentLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color="#fff" style={styles.loadingIndicator} />
-              <Text style={styles.payText}>Processing...</Text>
+        <View style={styles.footer}>
+          <TouchableOpacity 
+            style={[styles.payButton, isPaymentLoading && styles.payButtonDisabled]} 
+            onPress={navigateToPayment}
+            disabled={isPaymentLoading}
+          >
+            {isPaymentLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color="#fff" style={styles.loadingIndicator} />
+                <Text style={styles.payText}>Processing...</Text>
             </View>
-          ) : (
-            <Text style={styles.payText}>Make Payment</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
+            ) : (
+              <Text style={styles.payText}>Make Payment</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -1696,13 +1895,14 @@ const styles = StyleSheet.create({
   },
   backButtonTouch: { flexDirection: 'row', alignItems: 'center', padding: wp('1%') },
   backarrow: { width: wp('4.5%'), height: wp('4.5%'), resizeMode: 'contain', marginRight: wp('1%') },
-  backText: { fontSize: wp('4%'), fontFamily: 'Poppins-Bold', color: Colors.PRIMARY },
+  backText: { fontSize: wp('4%'), fontFamily: 'Poppins-Bold', color: '#000' },
   heading: {
-    fontSize: wp('5%'),
+    fontSize: wp('4.5%'),
     fontFamily: 'Poppins-SemiBold',
-    color: '#222',
+    color: '#000',
     textAlign: 'center',
     flex: 1,
+    fontWeight: 'bold',
   },
   placeholderView: { width: wp('15%') },
   boxRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: hp('2%') },
@@ -1723,11 +1923,12 @@ const styles = StyleSheet.create({
   boxTitle: { fontSize: wp('3%'), fontFamily: 'Poppins-SemiBold', color: '#333' },
   boxValue: { fontSize: wp('3%'), fontFamily: 'Poppins-Medium', color: '#777' },
   infoText: {
-    fontSize: wp('3.5%'),
-    color: '#888',
+    fontSize: wp('4.5%'),
+    color: '#000',
     marginBottom: hp('2%'),
-    fontFamily: 'Poppins-Medium',
+    fontFamily: 'Poppins-Bold',
     textAlign: 'center',
+    fontWeight: 'bold',
   },
   sectionFirst: { flexDirection: 'row', justifyContent: 'space-between', gap: wp('4%'), marginBottom: hp('2%') },
   sectionTitle: { fontSize: wp('4.2%'), fontFamily: 'Poppins-Medium', color: Colors.BTNRED },
@@ -1815,7 +2016,6 @@ const styles = StyleSheet.create({
     height: hp('6%'),
     justifyContent: 'center',
   },
-  // Styles for loading state
   payButtonDisabled: {
     backgroundColor: '#cccccc',
   },
@@ -1837,6 +2037,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#f9f9f9',
     borderRadius: wp('1.5%'),
     height: hp('8%'),
+  },
+  // Styles for empty products
+  emptyProductBox: {
+    padding: wp('2.5%'),
+    marginTop: hp('1%'),
+    backgroundColor: '#f0f0f0',
+    borderRadius: wp('1.5%'),
+    height: hp('4%'),
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyProductText: {
+    fontSize: wp('3.2%'),
+    fontFamily: 'Poppins-Medium',
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  emptyIndicator: {
+    fontSize: wp('3.2%'),
+    fontFamily: 'Poppins-Medium',
+    color: '#999',
+    fontStyle: 'italic',
   },
   topLeft: { position: 'absolute', top: hp('1%'), left: wp('2.5%'), fontSize: wp('3.5%'), fontFamily: 'Poppins-Medium' },
   topRight: { position: 'absolute', top: hp('1%'), right: wp('2.5%'), fontSize: wp('3.5%'), fontFamily: 'Poppins-Medium' },
@@ -1896,7 +2118,6 @@ const styles = StyleSheet.create({
   separator: { height: 1, backgroundColor: '#eee', marginVertical: hp('2%') },
   datePickerBtn: { width: 25, height: 25 },
   dateContainer: { position: 'absolute', top: hp('3.5%'), right: hp('1%') },
-  
 
   totalSection: {
     marginTop: hp('2%'),
@@ -1966,7 +2187,7 @@ const styles = StyleSheet.create({
   totalLabel: {
     fontSize: wp('3.8%'),
     fontFamily: 'Poppins-Medium',
-    color: '#666',
+    color: '#555',
   },
   totalValue: {
     fontSize: wp('3.8%'),
@@ -1986,7 +2207,35 @@ const styles = StyleSheet.create({
   totalAmountValue: {
     fontSize: wp('4.5%'),
     fontFamily: 'Poppins-Bold',
-    color: Colors.BTNGREEN,
+  },
+  // Suggestions styles
+  suggestionsContainer: {
+    position: 'absolute',
+    top: hp('5%'),
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: wp('1.5%'),
+    zIndex: 999,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: '#eee',
+    maxHeight: hp('15%'),
+  },
+  suggestionItem: {
+    paddingVertical: hp('1%'),
+    paddingHorizontal: wp('2.5%'),
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  suggestionText: {
+    fontSize: wp('3.5%'),
+    fontFamily: 'Poppins-Medium',
+    color: '#000',
   },
 });
 

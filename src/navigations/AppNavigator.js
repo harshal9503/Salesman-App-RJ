@@ -16,7 +16,16 @@ import InvoiceBillScreen from '../screens/GenerateInvoice/InvoiceBillScreen';
 import SecondInvoicePayment from '../screens/PaymentScreen/SecondInvoicePayment';
 import ThirdInvoicePayment from '../screens/PaymentScreen/ThirdInvoicePayment';
 import CustomOrderBill from '../screens/GenerateInvoice/CustomOrderBill'
-
+import showBill from '../screens/ShowBill/showBill';
+import RepairShowBill from '../screens/ShowBill/RepairShowBill';
+import CustomOrderShowBill from '../screens/ShowBill/CustomOrderShowBill';  
+import UpdateInvoiceScreen from '../screens/CreateInvoice/UpdateInvoiceScreen';
+import UpdateInvoiceBill from '../screens/PaymentScreen/UpdateInvoiceBill';
+import UpdateSecondBill from '../screens/PaymentScreen/UpdateSecondBill';
+import UpdateThirdBill from '../screens/PaymentScreen/UpdateThirdBill';
+import UpdateReapairingInvoice from '../screens/RepairingScreen/UpdateReapairingInvoice';
+import UpdateCustomOrder from '../screens/CustomOrder/UpdateCustomOrder';
+import CustomFirstShowBill from '../screens/ShowBill/CustomFirstShowBill';
 const Stack = createNativeStackNavigator();
 
 const AppNavigator = () => {
@@ -111,7 +120,78 @@ const AppNavigator = () => {
               headerShown: false,
             }}
           />
+          <Stack.Screen
+            name="show-bill"
+            component={showBill}
+            options={{
+              headerShown: false,
+            }}
+          />  
+          <Stack.Screen
+            name="repair-show-bill"
+            component={RepairShowBill}
+            options={{
+              headerShown: false,
+            }}
+          />
+          <Stack.Screen
+            name="custom-order-show-bill"
+            component={CustomOrderShowBill}
+            options={{
+              headerShown: false,
+            }}
+          />  
+          <Stack.Screen
+            name="update-invoice"
+            component={UpdateInvoiceScreen}
+            options={{
+              headerShown: false,
+            }}
+          />
+          <Stack.Screen
+            name="update-invoice-bill"
+            component={UpdateInvoiceBill}
+            options={{
+              headerShown: false,
+            }}
+          />  
+          <Stack.Screen
+            name="update-second-bill"
+            component={UpdateSecondBill}
+            options={{
+              headerShown: false,
+            }}
+          />
+          <Stack.Screen
+            name="update-third-bill"
+            component={UpdateThirdBill}
+            options={{
+              headerShown: false,
+            }}
+          />
+          <Stack.Screen
+            name="update-repairing-invoice"
+            component={UpdateReapairingInvoice}
+            options={{
+              headerShown: false,
+            }}
+          />
+          <Stack.Screen
+            name="update-custom-order"
+            component={UpdateCustomOrder}
+            options={{
+              headerShown: false,
+            }}
+          />
+          <Stack.Screen
+            name="custom-first-show-bill"
+            component={CustomFirstShowBill}
+            options={{
+              headerShown: false,
+            }}
+          />
         </Stack.Navigator>
+
       </NavigationContainer>
     </>
   );
